@@ -136,14 +136,17 @@ export default function ClassProfile() {
     return sortClasses(list);
   }, [isAdmin, schoolClasses, myClasses]);
 
+  const thisClass = classes.find((c) => c.class_id === classId);
+
   // Default: the current term, at the latest exam with published results for this class.
   useEffect(() => {
     if (!online || !terms.length || (termId && checkpoint)) return;
     // An archived class opens at the latest term of its own year, not today's term (it has no results then).
     const own = thisClass?.year ? terms.filter((t) => Number(t.academic_year) === Number(thisClass.year)) : [];
     const term = terms.find((t) => t.term_id === termId)
-      ?? (thisClass && thisClass.status !== 'CURRENT' && own[0])
-      ?? terms.find((t) => t.status === 'CURRENT') ?? terms[0];
+      ?? (thisClass?.status !== 'CURRENT' ? own[0] : undefined)
+      ?? terms.find((t) => t.status === 'CURRENT')
+      ?? terms[0];
     gql(LIST_RESULT_SETS, { school_id: actor.schoolId, class_id: classId, term_id: term.term_id })
       .then(({ listResultSets }) => {
         const published = (listResultSets || []).filter((s) => s.status === 'PUBLISHED').map((s) => s.checkpoint);
@@ -171,7 +174,6 @@ export default function ClassProfile() {
   const full = data?.scope === 'FULL';
   const labels = data?.rules?.labels ?? CHECKPOINT_ORDER.map((c) => ({ checkpoint: c, label: { OPENER: 'Opener', MIDTERM: 'Mid-term', ENDTERM: 'End-term' }[c] }));
   const exams = labels.filter((l) => l.checkpoint !== 'OPENER' || data?.rules?.opener_enabled);
-  const thisClass = classes.find((c) => c.class_id === classId);
   const canManage = isAdmin || thisClass?.is_class_teacher;
   const setQuery = (patch) => setParams({ term: termId, exam: checkpoint, ...patch });
   const scopeName = data?.subjects?.join(' & ');

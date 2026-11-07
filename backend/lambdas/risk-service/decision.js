@@ -4,7 +4,8 @@ import { termStatus, todayIn } from '../../library/calendar.js';
 import { canSeeFactor, CHECKPOINT_ORDER, INTERVENTION_STATUS, pointIndex, scopeFactors, scopeTargets, scopeView } from '../../library/decisionSupport.js';
 import { explain } from '../../library/explanations.js';
 import { POINT_NAMES } from '../../library/features.js';
-import { CHECKPOINT_LABEL, targetsOf } from '../../library/targets.js';
+import { CHECKPOINT_LABEL, selectedChanges } from '../../library/targets.js';
+import { predictionTargets } from '../../library/targetChoice.js';
 import { forbidden, notFound } from '../../library/errors.js';
 import * as assessments from '../../library/assessmentRepo.js';
 import * as interventions from '../../library/interventionRepo.js';
@@ -48,11 +49,18 @@ const subjectsIn = (row, scope) => (row?.subjects || [])
   .filter((s) => canSeeFactor(scope, s.subject))
   .map((s) => ({ subject: s.subject, score: s.score ?? null, grade: s.grade ?? null }));
 
+const resultsView = (row, scope) => row && ({
+  point: row.point,
+  label: CHECKPOINT_LABEL[row.point] ?? row.point,
+  average: scope.all ? row.checkpoint_average ?? null : null,
+  subjects: subjectsIn(row, scope),
+});
+
 /** The first option's changes the person may see, for cards and lists. */
 function bestChanges(prediction, scope) {
-  const t = scopeTargets(targetsOf(prediction?.counterfactuals), scope);
+  const t = scopeTargets(predictionTargets(prediction), scope);
   if (!t || !['FOUND', 'FALLBACK'].includes(t.status)) return [];
-  return t.options[0]?.changes ?? [];
+  return selectedChanges(t);
 }
 
 // ------------------------------------------------------------------ profile
@@ -61,6 +69,7 @@ export async function getStudentRiskProfile(actor, { school_id, student_id, acad
   const ctx = await studentContext(actor, school_id, student_id, academic_year ?? null);
   if (!ctx) throw notFound('Student not found');
   if (!ctx.scope) throw forbidden('You do not teach this student');
+
   const { scope } = ctx;
   const klass = ctx.student.class_id ? await platform.klass(school_id, ctx.student.class_id) : null;
   const [year, past] = await Promise.all([
@@ -68,10 +77,53 @@ export async function getStudentRiskProfile(actor, { school_id, student_id, acad
     history.listStudentHistory(school_id, student_id),
   ]);
   const { latest, current, last_published_point } = latestOf(year);
-  const previous = year.predictions.length > 1 ? year.predictions[year.predictions.length - 2] : null;
+  const previous = year.predictions.length > 1
+    ? year.predictions[year.predictions.length - 2]
+    : null;
+
   const e = latest ? explain(latest) : null;
   const lastResult = year.results[year.results.length - 1] ?? null;
 
+  // Results and interventions associated with each prediction checkpoint.
+  const resultsByPoint = new Map(year.results.map((r) => [r.point, r]));
+
+  const visible = await visibleInterventions(
+    school_id,
+    student_id,
+    scope,
+    year
+  );
+
+  // Each prediction gets its own explanation, targets and linked interventions.
+  const assessmentHistory = year.predictions.map((prediction) => {
+    const explanation = explain(prediction);
+
+    return {
+      prediction: summary(prediction),
+
+      base_probability: explanation?.base_probability ?? null,
+      explained: Boolean(explanation),
+
+      factors: explanation
+        ? scopeFactors(explanation.factors, scope)
+        : [],
+
+      targets: scopeTargets(
+        predictionTargets(prediction),
+        scope
+      ),
+
+      results: resultsView(
+        resultsByPoint.get(prediction.prediction_point),
+        scope
+      ),
+
+      interventions: visible.filter(
+        (i) => i.linked?.prediction_point === prediction.prediction_point
+          && Number(i.linked?.academic_year) === Number(ctx.academicYear)
+      ),
+    };
+  });
   // The years this student has published results in, so earlier years (before a promotion) can be opened.
   const years = [...new Set([...past.map((r) => Number(r.academic_year)), Number(ctx.academicYear)].filter(Number.isFinite))].sort((a, b) => b - a);
   const rowsThisYear = past.filter((r) => Number(r.academic_year) === Number(ctx.academicYear))
@@ -85,28 +137,30 @@ export async function getStudentRiskProfile(actor, { school_id, student_id, acad
     available_years: years,
     year_class_name: yearClass ? `${yearClass.name}${yearClass.year ? ` ${yearClass.year}` : ''}` : null,
     scope: ctx.scopeView,
+
     current,
     last_published_point,
+
+    // Retain these existing fields for backward compatibility.
     latest: summary(latest),
     previous: summary(previous),
     base_probability: e?.base_probability ?? null,
     explained: Boolean(e),
     factors: e ? scopeFactors(e.factors, scope) : [],
-    targets: latest ? scopeTargets(targetsOf(latest.counterfactuals), scope) : null,
-    results: lastResult && {
-      point: lastResult.point,
-      label: CHECKPOINT_LABEL[lastResult.point] ?? lastResult.point,
-      average: scope.all ? lastResult.checkpoint_average ?? null : null,
-      subjects: subjectsIn(lastResult, scope),
-    },
+    targets: latest
+      ? scopeTargets(predictionTargets(latest), scope)
+      : null,
+
+    results: resultsView(lastResult, scope),
+
+    // New complete assessment history.
+    assessment_history: assessmentHistory,
+
     risk_trend: year.predictions.map(summary),
-    performance_trend: year.results.map((r) => ({
-      point: r.point,
-      label: CHECKPOINT_LABEL[r.point] ?? r.point,
-      average: scope.all ? r.checkpoint_average ?? null : null,
-      subjects: subjectsIn(r, scope),
-    })),
-    interventions: await visibleInterventions(school_id, student_id, scope, year),
+
+    performance_trend: year.results.map((r) => resultsView(r, scope)),
+
+    interventions: visible,
   };
 }
 

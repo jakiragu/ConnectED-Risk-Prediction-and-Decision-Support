@@ -39,20 +39,65 @@ export const influenceItems = (factors) => factors.map((f) => ({
 }));
 
 /** The targets for the next checkpoint, as a short table. */
-export function Targets({ targets: t }) {
-  if (!t) return null;
-  if (t.status === 'MAINTAIN') return <Notice tone="success">Keeping the current results and attendance should be enough for the {t.target_label}.</Notice>;
-  if (t.status === 'NONE') return <div className="hint">No target: {t.reason}</div>;
-  if (t.status === 'ERROR') return <div className="hint">Targets could not be worked out for this estimate.</div>;
-  const [selectedIndex, setSelectedIndex] = useState(0);
+export function Targets({
+  targets: t,
+  selectedIndex: selectedIndexProp,
+  onSelectedIndexChange,
+  allowSelection = true,
+  selectedOnly = false,
+  onSave,
+  saving = false,
+  saveDisabled = false,
+}) {
+  const [internalSelectedIndex, setInternalSelectedIndex] = useState(null);
+
+  const controlled = typeof onSelectedIndexChange === 'function';
+
+  const selectedIndex = controlled
+    ? selectedIndexProp ?? t?.selected_option ?? 0
+    : internalSelectedIndex ?? t?.selected_option ?? 0;
+
+  const setSelectedIndex = controlled
+    ? onSelectedIndexChange
+    : setInternalSelectedIndex;
 
   useEffect(() => {
-    setSelectedIndex(0);
-  }, [t]);
+    if (!controlled) setInternalSelectedIndex(null);
+  }, [t, controlled]);
 
-  if (!t.options?.length) return <div className="hint">No target for these subjects.</div>;
+  if (!t) return null;
 
-  const selected = t.options[selectedIndex];
+  if (t.status === 'MAINTAIN') {
+    return (
+      <Notice tone="success">
+        Keeping the current results and attendance should be enough for the {t.target_label}.
+      </Notice>
+    );
+  }
+
+  if (t.status === 'NONE') {
+    return <div className="hint">No target: {t.reason}</div>;
+  }
+
+  if (t.status === 'ERROR') {
+    return (
+      <div className="hint">
+        Targets could not be worked out for this estimate.
+      </div>
+    );
+  }
+
+  if (!t.options?.length) {
+    return <div className="hint">No target for these subjects.</div>;
+  }
+
+  const hasAlternatives = t.status === 'FOUND' && t.options.filter((option) => option.method === 'dice-random').length > 1;
+  if (selectedOnly && !t.selection_saved) {
+    return <div className="hint">No selection recorded for this assessment.</div>;
+  }
+  const activeIndex = selectedOnly ? t.selected_option : selectedIndex;
+  const selected = t.options.find((o, i) => (o.option_index ?? i) === activeIndex);
+
   return (
     <div className="stack">
       <div className="row">
@@ -67,21 +112,37 @@ export function Targets({ targets: t }) {
           </span>
         )}
       </div>
-      {t.options.length > 1 && (
-        <div className="stack">
-          <span className="hint">Choose a target option:</span>
-          <div className="row wrap">
-            {t.options.map((option, i) => (
-              <button key={i} type="button" className={`btn ${selectedIndex === i ? '' : 'secondary'}`}
-                aria-pressed={selectedIndex === i} onClick={() => setSelectedIndex(i)}
-              >
-                Option {i + 1}
-              </button>
-            ))}
+      {selectedOnly && t.selection_saved && <div className="hint">Selected at the time</div>}
+      {!selectedOnly && hasAlternatives && (
+        <div className="target-choice">
+          <div className="target-choice-options" role="group" aria-label="Counterfactual options">
+            {t.options.map((option, i) => {
+              const index = option.option_index ?? i;
+              const saved = t.selection_saved && index === t.selected_option;
+              return (
+                <button key={index} type="button"
+                  className={`target-choice-option${activeIndex === index ? ' active' : ''}`}
+                  aria-pressed={activeIndex === index}
+                  disabled={saving || !allowSelection || !setSelectedIndex}
+                  onClick={() => setSelectedIndex?.(index)}>
+                  Option {index + 1}{saved && <span className="target-choice-saved"> · Selected</span>}
+                </button>
+              );
+            })}
           </div>
+          {onSave && selected && (!t.selection_saved || activeIndex !== t.selected_option) && (
+            <div className="target-choice-action">
+              <button type="button" className="btn primary small" disabled={saving || saveDisabled}
+                onClick={() => onSave(activeIndex)}>
+                {saving ? 'Saving…' : `Select option ${activeIndex + 1}`}
+              </button>
+              {saveDisabled && <span className="hint">Connect and finish loading to save.</span>}
+            </div>
+          )}
         </div>
       )}
 
+      {!selected && <div className="hint">The selected option has no targets for your subjects.</div>}
       <div className="table-wrap">
         <table className="targets">
           <thead>
@@ -93,7 +154,7 @@ export function Targets({ targets: t }) {
             </tr>
           </thead>
           <tbody>
-            {selected.changes.map((c) => (
+            {(selected?.changes ?? []).map((c) => (
               <tr key={c.column}>
                 <td>{c.kind === 'attendance' ? 'Attendance' : c.group}</td>
                 <td className="num">{value(c, c.from)}</td>

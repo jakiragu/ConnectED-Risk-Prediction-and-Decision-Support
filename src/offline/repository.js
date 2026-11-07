@@ -121,12 +121,41 @@ export const repository = {
       (await gql(GET_SCHOOL_RISK_OVERVIEW, { school_id: schoolId, academic_year: academicYear })).getSchoolRiskOverview),
 
   /** A student's risk profile; its interventions also go into the device copy the intervention form works from. */
-  /** year: null for the current school year, or an earlier year (before a promotion). Each year is kept separately. */
   async loadProfile(schoolId, studentId, year = null) {
     const out = await readThrough(year ? `profile:${studentId}:${year}` : `profile:${studentId}`, async () =>
-      (await gql(GET_STUDENT_RISK_PROFILE, { school_id: schoolId, student_id: studentId, academic_year: year })).getStudentRiskProfile);
-    if (out.data && !out.fromDevice) await mergeInterventions(studentId, out.data.interventions);
-    return out;
+      (await gql(GET_STUDENT_RISK_PROFILE, {
+        school_id: schoolId,
+        student_id: studentId,
+        academic_year: year,
+      })).getStudentRiskProfile);
+
+    if (!out.data) return out;
+
+    if (!out.fromDevice) {
+      await mergeInterventions(studentId, out.data.interventions);
+
+      // Refresh the logged-in teacher's class assignments.
+      await repository.loadClasses(schoolId).catch(() => {});
+    }
+
+    // Find this student's class in the logged-in teacher's class list.
+    const classId = out.data.student?.class_id;
+    const klass = classId
+      ? await db().classes.get(classId)
+      : null;
+
+    return {
+      ...out,
+      data: {
+        ...out.data,
+        teaching: {
+          subjects: Array.isArray(klass?.my_subjects)
+            ? klass.my_subjects
+            : [],
+          isClassTeacher: klass?.is_class_teacher === true,
+        },
+      },
+    };
   },
 
   loadMethods: (schoolId, factor) =>

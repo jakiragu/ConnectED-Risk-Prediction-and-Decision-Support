@@ -9,6 +9,7 @@ import { repository } from '../offline/repository.js';
 import { useLive } from '../offline/useLive.js';
 import { useSync } from '../offline/useSync.js';
 import { DangerButton, ActionIcon } from '../components/ui.jsx';
+import { loadStudentRisk } from '../api/studentRisk.js';
 import { classLabel, isCurrent, sortClasses } from '../classLabels.js';
 
 const statusText = (s) => (s.status === 'ACTIVE' ? 'Active'
@@ -26,6 +27,10 @@ export default function Students() {
   const canManage = isAdmin || Boolean(klass?.is_class_teacher);
 
   const [students, setStudents] = useState([]);
+  const [risks, setRisks] = useState(new Map());
+  const [riskError, setRiskError] = useState(null);
+  const [riskLoading, setRiskLoading] = useState(false);
+  const canReadRisk = isAdmin || Boolean(klass?.is_class_teacher);
   const [showInactive, setShowInactive] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [editing, setEditing] = useState(null);
@@ -47,6 +52,22 @@ export default function Students() {
   useEffect(() => {
     if (online) load().catch((e) => setError(e.message));
   }, [load, online]);
+
+  // Risk is optional enrichment: a denied or failed request never hides the roster.
+  useEffect(() => {
+    let live = true;
+    setRisks(new Map());
+    setRiskError(null);
+    setRiskLoading(online && canReadRisk);
+    if (online && canReadRisk) {
+      loadStudentRisk({ request: gql, schoolId: actor.schoolId, classId,
+        academicYear: klass?.year, allowed: canReadRisk })
+        .then((value) => { if (live) setRisks(value); })
+        .catch(() => { if (live) setRiskError('Risk estimates could not be loaded. Student records are still available.'); })
+        .finally(() => { if (live) setRiskLoading(false); });
+    }
+    return () => { live = false; };
+  }, [online, canReadRisk, actor.schoolId, classId, klass?.year]);
 
   async function run(mutation, input, done) {
     setError(null);
@@ -95,6 +116,7 @@ export default function Students() {
       )}
       {error && <div className="card error-card">{error}</div>}
       {notice && <div className="notice">{notice}</div>}
+      {riskError && <div className="notice">{riskError}</div>}
       {departure && <form className="card stack" onSubmit={async (e) => { e.preventDefault(); const { student, ...details } = departure; if (await run(SET_STUDENT_STATUS, { student_id: student.student_id, status: 'INACTIVE', _version: student._version, ...details }, 'Student status recorded')) setDeparture(null); }}>
         <h2>Deactivate {departure.student.first_name} {departure.student.last_name}</h2>
         <Field label="Departure type"><Select value={departure.departure_kind} onChange={(departure_kind) => setDeparture({ ...departure, departure_kind })} options={[{ value: 'TEMPORARY', label: 'Temporarily deactivated' }, { value: 'LEFT', label: 'Permanently left the school' }]} /></Field>
@@ -165,7 +187,17 @@ export default function Students() {
                   <td>{s.first_name}</td>
                   <td>{s.last_name}</td>
                   <td>{s.status === 'ACTIVE' ? 'Active' : <span className={s.status === 'GRADUATED' ? 'hint' : 'warn'}>{statusText(s)}</span>}</td>
-                  <td><Link to={`/students/${s.student_id}/risk`} state={{ from: `/classes/${classId}/students` }}>Risk profile</Link></td>
+                  <td>
+                    {canReadRisk && (risks.has(s.student_id) ? (
+                      <div>
+                        <b className={risks.get(s.student_id).at_risk ? 'risk' : 'good'}>
+                          {Math.round(risks.get(s.student_id).probability * 100)}% · {risks.get(s.student_id).at_risk ? 'At risk' : 'Not flagged'}
+                        </b>
+                        <div className="hint">{risks.get(s.student_id).prediction_point} · {risks.get(s.student_id).academic_year}</div>
+                      </div>
+                    ) : <div className="hint">{riskLoading ? 'Loading risk…' : riskError ? 'Risk unavailable' : 'No prediction'}</div>)}
+                    <Link to={`/students/${s.student_id}/risk`} state={{ from: `/classes/${classId}/students` }}>Risk profile</Link>
+                  </td>
                   {canManage && s.status === 'GRADUATED' && <td className="hint">Read-only record</td>}
                   {canManage && s.status !== 'GRADUATED' && (
                     <td className="actions student-actions">

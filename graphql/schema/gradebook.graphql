@@ -803,7 +803,16 @@ type RiskTargetChange {
   peer_change: Float           # fallback only: the peers' change at the target percentile
 }
 
+input SelectStudentTargetInput {
+  school_id: ID!
+  student_id: ID!
+  prediction_token: String!
+  option_index: Int!
+  expected_version: Int!
+}
+
 type RiskTargetOption {
+  option_index: Int
   method: String!              # dice-random | peer-progression
   score: Float                 # next model's probability, or the projected T3F average
   at_risk: Boolean!            # whether the projection is still at risk
@@ -819,6 +828,10 @@ type RiskTargetCap {
 }
 
 type RiskTargets {
+  selected_option: Int
+  selection_version: Int
+  selection_saved: Boolean
+  prediction_token: String
   status: TargetsStatus!
   reason: String
   method: String
@@ -1378,6 +1391,16 @@ type CheckpointResults {
   subjects: [ProfileSubjectResult!]!
 }
 
+type ProfileAssessment {
+  prediction: RiskSummary!
+  base_probability: Float
+  explained: Boolean!
+  factors: [RiskFactor!]!
+  targets: RiskTargets
+  results: CheckpointResults
+  interventions: [Intervention!]!
+}
+
 type StudentRiskProfile {
   student: ProfileStudent!
   academic_year: Int
@@ -1396,6 +1419,7 @@ type StudentRiskProfile {
   risk_trend: [RiskSummary!]!
   performance_trend: [CheckpointResults!]!
   interventions: [Intervention!]!
+  assessment_history: [ProfileAssessment!]!
 }
 
 type DashboardAtRisk {
@@ -1819,6 +1843,7 @@ type Mutation {
   updateTerm(input: UpdateTermInput!): Term!                                  # Admin
   submitAttendance(input: SubmitAttendanceInput!): SubmitAttendanceResult!    # Admin | class teacher
   runRiskPredictions(input: RunRiskPredictionsInput!): RiskRun!               # Admin; queues a fresh run
+  selectStudentTarget(input: SelectStudentTargetInput!): RiskTargets!
   saveIntervention(input: SaveInterventionInput!): Intervention!              # Admin | class teacher | subject teacher (own subjects)
   deleteIntervention(input: DeleteInterventionInput!): Intervention!
   applyPromotion(input: ApplyPromotionInput!): PromotionRun!                  # Admin; resumable, idempotent
