@@ -4,7 +4,8 @@ import { termStatus, todayIn } from '../../library/calendar.js';
 import { canSeeFactor, CHECKPOINT_ORDER, INTERVENTION_STATUS, pointIndex, scopeFactors, scopeTargets, scopeView } from '../../library/decisionSupport.js';
 import { explain } from '../../library/explanations.js';
 import { POINT_NAMES } from '../../library/features.js';
-import { CHECKPOINT_LABEL, targetsOf } from '../../library/targets.js';
+import { CHECKPOINT_LABEL, selectedChanges } from '../../library/targets.js';
+import { predictionTargets } from '../../library/targetChoice.js';
 import { forbidden, notFound } from '../../library/errors.js';
 import * as assessments from '../../library/assessmentRepo.js';
 import * as interventions from '../../library/interventionRepo.js';
@@ -57,9 +58,9 @@ const resultsView = (row, scope) => row && ({
 
 /** The first option's changes the person may see, for cards and lists. */
 function bestChanges(prediction, scope) {
-  const t = scopeTargets(targetsOf(prediction?.counterfactuals), scope);
+  const t = scopeTargets(predictionTargets(prediction), scope);
   if (!t || !['FOUND', 'FALLBACK'].includes(t.status)) return [];
-  return t.options[0]?.changes ?? [];
+  return selectedChanges(t);
 }
 
 // ------------------------------------------------------------------ profile
@@ -70,17 +71,6 @@ export async function getStudentRiskProfile(actor, { school_id, student_id, acad
   if (!ctx.scope) throw forbidden('You do not teach this student');
 
   const { scope } = ctx;
-  const klass = ctx.student.class_id
-    ? await platform.klass(school_id, ctx.student.class_id)
-    : null;
-
-  const year = await studentYear(
-    school_id,
-    student_id,
-    ctx.academicYear,
-    ctx.terms
-  );
-
   const klass = ctx.student.class_id ? await platform.klass(school_id, ctx.student.class_id) : null;
   const [year, past] = await Promise.all([
     studentYear(school_id, student_id, ctx.academicYear, ctx.terms),
@@ -119,7 +109,7 @@ export async function getStudentRiskProfile(actor, { school_id, student_id, acad
         : [],
 
       targets: scopeTargets(
-        targetsOf(prediction.counterfactuals),
+        predictionTargets(prediction),
         scope
       ),
 
@@ -130,6 +120,7 @@ export async function getStudentRiskProfile(actor, { school_id, student_id, acad
 
       interventions: visible.filter(
         (i) => i.linked?.prediction_point === prediction.prediction_point
+          && Number(i.linked?.academic_year) === Number(ctx.academicYear)
       ),
     };
   });
@@ -157,7 +148,7 @@ export async function getStudentRiskProfile(actor, { school_id, student_id, acad
     explained: Boolean(e),
     factors: e ? scopeFactors(e.factors, scope) : [],
     targets: latest
-      ? scopeTargets(targetsOf(latest.counterfactuals), scope)
+      ? scopeTargets(predictionTargets(latest), scope)
       : null,
 
     results: resultsView(lastResult, scope),

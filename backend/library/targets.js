@@ -63,10 +63,13 @@ export function targetText(change) {
 }
 
 /** @param {object|null} cf  the counterfactuals stored on a prediction */
-export function targetsOf(cf) {
+export function targetsOf(cf, choice = null) {
   if (!cf) return null;
   const ev = cf.evaluation || {};
   return {
+    selected_option: choice?.option_index ?? 0,
+    selection_version: choice?.version ?? 0,
+    selection_saved: Boolean(choice),
     status: cf.status,
     reason: cf.reason ?? null,
     method: cf.method ?? null,
@@ -88,7 +91,8 @@ export function targetsOf(cf) {
       max_value: c.max_value,
       source: c.source,
     })),
-    options: (cf.options || []).map((o) => ({
+    options: (cf.options || []).map((o, option_index) => ({
+      option_index,
       method: o.method,
       score: o.score ?? null,
       at_risk: Boolean(o.at_risk),
@@ -98,5 +102,9 @@ export function targetsOf(cf) {
 }
 
 /** The first option's changes (FOUND or FALLBACK), for lists. */
-export const bestTarget = (cf) =>
-  (cf?.status === TARGETS.FOUND || cf?.status === TARGETS.FALLBACK) && cf.options?.length ? cf.options[0].changes.map(changeView) : [];
+export const bestTarget = (cf, choice = null) =>
+  (cf?.status === TARGETS.FOUND || cf?.status === TARGETS.FALLBACK) && cf.options?.length ? cf.options[choice?.option_index ?? 0]?.changes.map(changeView) ?? [] : [];
+
+/** Stable option ids survive subject-level filtering. */
+export const selectedChanges = (targets) =>
+  targets?.options?.find((o, i) => (o.option_index ?? i) === (targets.selected_option ?? 0))?.changes ?? [];

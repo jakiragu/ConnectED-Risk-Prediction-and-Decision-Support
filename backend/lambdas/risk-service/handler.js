@@ -1,9 +1,11 @@
 import { assertTenant, assertAdmin, assertClassTeacherOrAdmin, isAdmin, isClassTeacherOf } from '../../library/authz.js';
+import { selectStudentTarget } from './targetChoice.js';
+import { predictionTargets } from '../../library/targetChoice.js';
 import { resolveActor } from '../../library/actor.js';
 import { todayIn } from '../../library/calendar.js';
 import { POINT_NAMES, pointFor } from '../../library/features.js';
 import { columnLabel, displayGroup, explain, importanceOver, topFactors } from '../../library/explanations.js';
-import { bestTarget, targetsOf } from '../../library/targets.js';
+import { bestTarget } from '../../library/targets.js';
 import { forbidden, validation, notFound } from '../../library/errors.js';
 import { ulid } from '../../library/ids.js';
 import { invoke, predictionFunction, scorerFunction } from '../../library/invoke.js';
@@ -43,6 +45,8 @@ export async function handler(event) {
       return getRiskDashboard(actor, args).then(withTrends);
     case 'getSchoolRiskOverview':
       return getSchoolRiskOverview(actor, args);
+    case 'selectStudentTarget':
+      return selectStudentTarget(actor, input);
     case 'runRiskPredictions':
       return runRiskPredictions(actor, input);
     default:
@@ -102,7 +106,7 @@ const predictionView = (p, student) => ({
   explained: Boolean(p.shap_values),
   top_factors: topFactors(p, 3),
   targets_status: p.counterfactuals?.status ?? null,
-  best_target: bestTarget(p.counterfactuals),
+  best_target: bestTarget(p.counterfactuals, p.target_choice),
 });
 
 async function listRiskPredictions(actor, { school_id, class_id, prediction_point, academic_year }) {
@@ -143,7 +147,7 @@ async function getRiskExplanation(actor, { school_id, student_id, prediction_poi
     explained: Boolean(e),
     base_probability: e?.base_probability ?? null,
     factors: e?.factors ?? [],
-    targets: targetsOf(p.counterfactuals),
+    targets: predictionTargets(p),
   };
 }
 

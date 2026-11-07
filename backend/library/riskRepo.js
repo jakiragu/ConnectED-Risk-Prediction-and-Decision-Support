@@ -1,6 +1,7 @@
 import { BatchWriteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb } from './client.js';
 import { TABLE, pk, sk, gsi2 } from './keys.js';
+import { conflict } from './errors.js';
 
 /**
  * Risk predictions and the runs that produced them.
@@ -121,10 +122,31 @@ export const listForClass = (schoolId, academicYear, point, classId) =>
     ExpressionAttributeValues: { ':p': pk(schoolId), ':s': sk.riskPointPrefix(academicYear, point), ':c': classId },
   });
 
-export const listForStudent = (schoolId, studentId, academicYear) =>
-  queryAll({
-    TableName: TABLE,
-    IndexName: 'GSI2',
-    KeyConditionExpression: 'GSI2PK = :p AND begins_with(GSI2SK, :s)',
-    ExpressionAttributeValues: { ':p': gsi2.pk(schoolId, studentId), ':s': gsi2.riskYearPrefix(academicYear) },
-  });
+export const listForStudent = async (schoolId, studentId, academicYear) =>
+  (await Promise.all(['T1M', 'T1F', 'T2M', 'T2F', 'T3M'].map((point) =>
+    getPrediction(schoolId, academicYear, point, studentId)))).filter(Boolean);
+
+export async function saveTargetChoice(schoolId, prediction, optionIndex, actor, expectedVersion) {
+  const choice = { option_index: optionIndex, version: expectedVersion + 1, updated_by: actor.sub, updated_at: nowIso() };
+  // Run identity guards replacement while the token validates the displayed options.
+  const conditions = ['attribute_exists(PK)'];
+  const values = { ':choice': choice };
+  for (const key of ['run_id', 'predicted_at', 'model_version']) {
+    if (prediction[key] == null) conditions.push(`attribute_not_exists(${key})`);
+    else { conditions.push(`${key} = :${key}`); values[`:${key}`] = prediction[key]; }
+  }
+  if (expectedVersion === 0) conditions.push('attribute_not_exists(target_choice)');
+  else { conditions.push('target_choice.#v = :version'); values[':version'] = expectedVersion; }
+  try {
+    const result = await ddb.send(new UpdateCommand({
+      TableName: TABLE, Key: { PK: pk(schoolId), SK: sk.risk(prediction.academic_year, prediction.prediction_point, prediction.student_id) },
+      UpdateExpression: 'SET target_choice = :choice', ConditionExpression: conditions.join(' AND '),
+      ExpressionAttributeValues: values,
+      ...(expectedVersion ? { ExpressionAttributeNames: { '#v': 'version' } } : {}), ReturnValues: 'ALL_NEW',
+    }));
+    return result.Attributes;
+  } catch (e) {
+    if (e.name === 'ConditionalCheckFailedException') throw conflict('The prediction or selected option changed. Refresh before saving again.');
+    throw e;
+  }
+}

@@ -121,11 +121,12 @@ export const repository = {
       (await gql(GET_SCHOOL_RISK_OVERVIEW, { school_id: schoolId, academic_year: academicYear })).getSchoolRiskOverview),
 
   /** A student's risk profile; its interventions also go into the device copy the intervention form works from. */
-  async loadProfile(schoolId, studentId) {
-    const out = await readThrough(`profile:${studentId}`, async () =>
+  async loadProfile(schoolId, studentId, year = null) {
+    const out = await readThrough(year ? `profile:${studentId}:${year}` : `profile:${studentId}`, async () =>
       (await gql(GET_STUDENT_RISK_PROFILE, {
         school_id: schoolId,
         student_id: studentId,
+        academic_year: year,
       })).getStudentRiskProfile);
 
     if (!out.data) return out;

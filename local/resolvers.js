@@ -101,6 +101,7 @@ export const RESOLVERS = {
     updateTerm: calendarService,
     submitAttendance: attendanceService,
     runRiskPredictions: riskService,
+    selectStudentTarget: riskService,
     saveIntervention: interventionService,
     deleteIntervention: interventionService,
   },

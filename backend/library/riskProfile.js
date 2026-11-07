@@ -1,7 +1,7 @@
 import { isAdmin, isClassTeacherOf, subjectsITeach } from './authz.js';
 import { todayIn } from './calendar.js';
 import { checkpointPoint, factorSeries, outcomeOf, pointIndex, riskScope, scopeView, targetForFactor, canSeeFactor } from './decisionSupport.js';
-import { targetsOf } from './targets.js';
+import { predictionTargets } from './targetChoice.js';
 import * as history from './historyRepo.js';
 import * as interventions from './interventionRepo.js';
 import * as platform from './platformRepo.js';
@@ -67,7 +67,7 @@ export function latestOf(year) {
 /** What an intervention responds to: the student's latest prediction this year, with the target set for its factor then. */
 export function linkFor(prediction, factor) {
   if (!prediction) return null;
-  const targets = targetsOf(prediction.counterfactuals);
+  const targets = predictionTargets(prediction);
   return {
     academic_year: prediction.academic_year,
     prediction_point: prediction.prediction_point,
@@ -78,7 +78,8 @@ export function linkFor(prediction, factor) {
     threshold: prediction.threshold ?? null,
     predicted_at: prediction.predicted_at ?? null,
     targets_status: targets?.status ?? null,
-    target: targetForFactor(targets, factor),
+    target: targetForFactor(targets && { ...targets, selection_saved: true }, factor),
+    ...(targets ? { target_option: targets.selected_option, target_changes: targets.options.find((o) => o.option_index === targets.selected_option)?.changes ?? [] } : {}),
   };
 }
 

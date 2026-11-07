@@ -25,10 +25,11 @@ export const GET_RISK_EXPLANATION = `
         columns { name label group value missing effect direction }
       }
       targets {
+        selected_option selection_version selection_saved prediction_token
         status reason method target_point target_label evaluation_kind model_point threshold pass_mark
         missing_score_policy baseline_score baseline_at_risk dice_reason stats_available
         caps { column label max_increase max_value source }
-        options { method score at_risk changes { ${CHANGE_FIELDS} } }
+        options { option_index method score at_risk changes { ${CHANGE_FIELDS} } }
       }
     }
   }`;

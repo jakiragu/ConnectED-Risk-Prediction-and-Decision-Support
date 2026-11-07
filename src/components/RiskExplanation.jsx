@@ -44,21 +44,25 @@ export function Targets({
   selectedIndex: selectedIndexProp,
   onSelectedIndexChange,
   allowSelection = true,
+  selectedOnly = false,
+  onSave,
+  saving = false,
+  saveDisabled = false,
 }) {
-  const [internalSelectedIndex, setInternalSelectedIndex] = useState(0);
+  const [internalSelectedIndex, setInternalSelectedIndex] = useState(null);
 
-  const controlled = selectedIndexProp != null;
+  const controlled = typeof onSelectedIndexChange === 'function';
 
   const selectedIndex = controlled
-    ? selectedIndexProp
-    : internalSelectedIndex;
+    ? selectedIndexProp ?? t?.selected_option ?? 0
+    : internalSelectedIndex ?? t?.selected_option ?? 0;
 
   const setSelectedIndex = controlled
     ? onSelectedIndexChange
     : setInternalSelectedIndex;
 
   useEffect(() => {
-    if (!controlled) setInternalSelectedIndex(0);
+    if (!controlled) setInternalSelectedIndex(null);
   }, [t, controlled]);
 
   if (!t) return null;
@@ -87,7 +91,12 @@ export function Targets({
     return <div className="hint">No target for these subjects.</div>;
   }
 
-  const selected = t.options[selectedIndex] ?? t.options[0];
+  const hasAlternatives = t.status === 'FOUND' && t.options.filter((option) => option.method === 'dice-random').length > 1;
+  if (selectedOnly && !t.selection_saved) {
+    return <div className="hint">No selection recorded for this assessment.</div>;
+  }
+  const activeIndex = selectedOnly ? t.selected_option : selectedIndex;
+  const selected = t.options.find((o, i) => (o.option_index ?? i) === activeIndex);
 
   return (
     <div className="stack">
@@ -103,26 +112,37 @@ export function Targets({
           </span>
         )}
       </div>
-      {t.options.length > 1 && (
-        <div className="stack">
-          <span className="hint">Choose a target option:</span>
-          <div className="row wrap">
-            {t.options.map((option, i) => (
-              <button key={i} type="button" className={`btn ${selectedIndex === i ? '' : 'secondary'}`}
-                aria-pressed={selectedIndex === i} disabled={!allowSelection} onClick={() => setSelectedIndex(i)}
-              >
-                Option {i + 1}
-              </button>
-            ))}
+      {selectedOnly && t.selection_saved && <div className="hint">Selected at the time</div>}
+      {!selectedOnly && hasAlternatives && (
+        <div className="target-choice">
+          <div className="target-choice-options" role="group" aria-label="Counterfactual options">
+            {t.options.map((option, i) => {
+              const index = option.option_index ?? i;
+              const saved = t.selection_saved && index === t.selected_option;
+              return (
+                <button key={index} type="button"
+                  className={`target-choice-option${activeIndex === index ? ' active' : ''}`}
+                  aria-pressed={activeIndex === index}
+                  disabled={saving || !allowSelection || !setSelectedIndex}
+                  onClick={() => setSelectedIndex?.(index)}>
+                  Option {index + 1}{saved && <span className="target-choice-saved"> · Selected</span>}
+                </button>
+              );
+            })}
           </div>
-          {!allowSelection && t.options.length > 1 && (
-            <div className="hint">
-              Alternative target options are available only for the most recent current assessment.
+          {onSave && selected && (!t.selection_saved || activeIndex !== t.selected_option) && (
+            <div className="target-choice-action">
+              <button type="button" className="btn primary small" disabled={saving || saveDisabled}
+                onClick={() => onSave(activeIndex)}>
+                {saving ? 'Saving…' : `Select option ${activeIndex + 1}`}
+              </button>
+              {saveDisabled && <span className="hint">Connect and finish loading to save.</span>}
             </div>
           )}
         </div>
       )}
 
+      {!selected && <div className="hint">The selected option has no targets for your subjects.</div>}
       <div className="table-wrap">
         <table className="targets">
           <thead>
@@ -134,7 +154,7 @@ export function Targets({
             </tr>
           </thead>
           <tbody>
-            {selected.changes.map((c) => (
+            {(selected?.changes ?? []).map((c) => (
               <tr key={c.column}>
                 <td>{c.kind === 'attendance' ? 'Attendance' : c.group}</td>
                 <td className="num">{value(c, c.from)}</td>

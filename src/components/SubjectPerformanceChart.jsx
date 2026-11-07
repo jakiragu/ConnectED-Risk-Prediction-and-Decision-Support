@@ -1,11 +1,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-const TERMS = [
-  { value: 1, label: 'Term 1', mid: 'T1M', end: 'T1F' },
-  { value: 2, label: 'Term 2', mid: 'T2M', end: 'T2F' },
-  { value: 3, label: 'Term 3', mid: 'T3M', end: 'T3F' },
-];
+import { CHART_TERMS as TERMS, subjectTargets, chartTerms } from '../profileComparison.js';
 
 const COLORS = {
   mid: '#075566',
@@ -13,38 +9,7 @@ const COLORS = {
   target: '#111111',
 };
 
-const normalise = (value) =>
-  String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
 const clamp = (value) => Math.max(0, Math.min(100, value));
-
-function getSubjectTargets(option, subjects) {
-  const targets = new Map();
-
-  for (const change of option?.changes ?? []) {
-    if (change.kind === 'attendance' || change.to == null) continue;
-
-    const text = [
-      change.column,
-      change.label,
-      change.group,
-    ].filter(Boolean).join(' ');
-
-    const checkpoint = text.match(/T[1-3][MF]/i)?.[0]?.toUpperCase();
-    if (!checkpoint) continue;
-
-    const subject = subjects.find((name) => {
-      const candidate = normalise(name);
-      return candidate && normalise(text).includes(candidate);
-    });
-
-    if (!subject) continue;
-
-    targets.set(`${checkpoint}:${subject}`, Number(change.to));
-  }
-
-  return targets;
-}
 
 export default function SubjectPerformanceChart({
   performanceTrend,
@@ -55,15 +20,8 @@ export default function SubjectPerformanceChart({
   const [width, setWidth] = useState(0);
   const [term, setTerm] = useState(3);
 
-  const availableTerms = useMemo(
-    () =>
-      TERMS.filter(({ mid, end }) =>
-        performanceTrend.some(
-          (result) => result.point === mid || result.point === end
-        )
-      ),
-    [performanceTrend]
-  );
+  const targets = useMemo(() => subjectTargets(targetOption, subjects), [targetOption, subjects]);
+  const availableTerms = useMemo(() => chartTerms(performanceTrend, targets), [performanceTrend, targets]);
 
   useEffect(() => {
     if (!availableTerms.length) return;
@@ -81,33 +39,18 @@ export default function SubjectPerformanceChart({
 
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [availableTerms.length > 0]);
 
   const selectedTerm =
-    TERMS.find((item) => item.value === term) ?? TERMS[0];
+    availableTerms.find((item) => item.value === term) ?? availableTerms.at(-1) ?? TERMS[0];
 
   const resultsByPoint = useMemo(
     () => new Map(performanceTrend.map((result) => [result.point, result])),
     [performanceTrend]
   );
 
-  const targets = useMemo(
-    () => getSubjectTargets(targetOption, subjects),
-    [targetOption, subjects]
-  );
-
-  console.log(
-    'TARGET CHANGE DETAILS:',
-    JSON.stringify(targetOption?.changes, null, 2)
-  );
-
-  console.log(
-    'TARGET OPTION:',
-    JSON.stringify(targetOption, null, 2)
-  );
-
   if (!availableTerms.length) {
-    return <div className="hint">No published subject results yet.</div>;
+    return <div className="hint">No subject results or targets available yet.</div>;
   }
 
   const midResults = resultsByPoint.get(selectedTerm.mid);
@@ -144,7 +87,7 @@ export default function SubjectPerformanceChart({
         <label htmlFor="subject-chart-term">Term</label>
         <select
           id="subject-chart-term"
-          value={term}
+          value={selectedTerm.value}
           onChange={(event) => setTerm(Number(event.target.value))}
         >
           {availableTerms.map((item) => (
@@ -310,7 +253,7 @@ export default function SubjectPerformanceChart({
       <div className="subject-chart-legend">
         <span><i className="legend-swatch mid" />Mid-term</span>
         <span><i className="legend-swatch end" />End-term</span>
-        <span><i className="legend-swatch target" />Intervention target</span>
+        <span><i className="legend-swatch target" />Model-generated target</span>
       </div>
 
       <div className="hint">

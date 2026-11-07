@@ -1,3 +1,4 @@
+import { selectedChanges } from '@gradebook/domain/targets';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { todayIn } from '@gradebook/domain/calendar';
@@ -62,7 +63,7 @@ export default function InterventionForm() {
     repository.loadProfile(actor.schoolId, studentId).then((v) => {
       setProfile(v.data);
       if (v.data) {
-        const targeted = v.data.targets?.options?.[0]?.changes?.map((c) => c.group) ?? [];
+        const targeted = selectedChanges(v.data.targets)?.map((c) => c.group) ?? [];
         setDraft((d) => d || blank(targeted.find((g) => v.data.scope.factors.includes(g)) ?? v.data.scope.factors[0]));
       }
     }).catch((e) => setError(e.message));
@@ -75,7 +76,7 @@ export default function InterventionForm() {
 
   const factors = useMemo(() => {
     if (!profile) return [];
-    const targeted = new Set(profile.targets?.options?.[0]?.changes?.map((c) => c.group) ?? []);
+    const targeted = new Set(selectedChanges(profile.targets)?.map((c) => c.group) ?? []);
     return [...profile.scope.factors].sort((a, b) => Number(targeted.has(b)) - Number(targeted.has(a)) || a.localeCompare(b));
   }, [profile]);
 
@@ -117,7 +118,7 @@ export default function InterventionForm() {
 
   if (error && !profile) return <div className="stack"><Link to="/dashboard">Back</Link><div className="notice">{error}</div></div>;
   if (!profile || !draft) return <div className="hint">Loading…</div>;
-  const target = profile.targets?.options?.[0]?.changes ?? [];
+  const target = selectedChanges(profile.targets) ?? [];
   // Methods this student already has under way for the chosen subject: shown as ongoing, not offered again.
   const ongoingKeys = new Set(visible.filter((i) => i.status === INTERVENTION_STATUS.ONGOING && i.factor === draft.factor && i._pending !== 'DELETE').map((i) => methodKey(i.method)));
   const use = (method) => { setDraft({ ...draft, method }); methodRef.current?.focus(); };

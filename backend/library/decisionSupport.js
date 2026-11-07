@@ -106,7 +106,10 @@ export function groupOfColumn(column) {
 
 /** The target set for one factor at the time an intervention is logged: the first option that changes it. */
 export function targetForFactor(targets, factor) {
-  for (const o of targets?.options || []) {
+  const options = targets?.selection_saved
+    ? (targets.options || []).filter((o) => o.option_index === targets.selected_option)
+    : targets?.options || [];
+  for (const o of options) {
     const c = o.changes.find((x) => x.group === factor);
     if (c) return { column: c.column, label: c.label, from: c.from, to: c.to, gain: c.gain, method: o.method };
   }

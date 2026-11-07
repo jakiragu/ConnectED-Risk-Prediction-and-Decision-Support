@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { gql } from '../api/graphql.js';
+import { SELECT_STUDENT_TARGET } from '../api/decisionOperations.js';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { backTo } from '../navigation.js';
 import { CHECKPOINT_ORDER, FREQUENCY_LABEL } from '@gradebook/domain/decision';
@@ -7,6 +9,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { Select } from '../components/Field.jsx';
 import LineChart from '../components/LineChart.jsx';
 import { influenceItems, summarise, Targets } from '../components/RiskExplanation.jsx';
+import { profileAssessments } from '../profileComparison.js';
 import SubjectPerformanceChart from '../components/SubjectPerformanceChart.jsx';
 import { InfluenceChart } from '../components/ui.jsx';
 import { repository } from '../offline/repository.js';
@@ -54,7 +57,11 @@ function AssessmentPanel({
   targetIndex,
   onTargetIndexChange,
   allowTargetSelection = false,
+  onSaveTarget,
+  savingTarget = false,
+  targetSaveDisabled = false,
   isCurrent,
+  selectedOnly = false,
 }) {
   const prediction = entry?.prediction;
   const results = entry?.results;
@@ -69,7 +76,7 @@ function AssessmentPanel({
           {prediction && <div className="hint">{prediction.label}</div>}
         </div>
 
-        <label className="assessment-picker">
+        {onChange && <label className="assessment-picker">
           <span>Assessment checkpoint</span>
           <Select
             value={value ?? ''}
@@ -79,7 +86,7 @@ function AssessmentPanel({
             disabled={!options.length}
             aria-label={`${heading} checkpoint`}
           />
-        </label>
+        </label>}
       </div>
 
       {!entry ? (
@@ -151,7 +158,9 @@ function AssessmentPanel({
           {/* 3. SHAP explanation */}
           <h3>What moved the estimate</h3>
 
-          {!entry.explained ? (
+          {entry.historyIncomplete ? (
+            <div className="hint">Historical explanations were not saved in this offline copy. Reconnect to load them.</div>
+          ) : !entry.explained ? (
             <div className="hint">
               This estimate was made before explanations were available.
             </div>
@@ -171,7 +180,9 @@ function AssessmentPanel({
           {/* 4. Model-generated targets */}
           <h3>Model-generated targets</h3>
 
-          {entry.targets ? (
+          {entry.historyIncomplete ? (
+            <div className="hint">Reconnect to load targets for this checkpoint.</div>
+          ) : entry.targets ? (
             <>
               {entry.targets.partial && (
                 <div className="hint">
@@ -191,6 +202,10 @@ function AssessmentPanel({
                     selectedIndex={targetIndex}
                     onSelectedIndexChange={onTargetIndexChange}
                     allowSelection={allowTargetSelection}
+                    selectedOnly={selectedOnly}
+                    onSave={onSaveTarget}
+                    saving={savingTarget}
+                    saveDisabled={targetSaveDisabled}
                   />
                 )}
             </>
@@ -263,14 +278,25 @@ export default function StudentProfile() {
   const [year, setYear] = useState(null); // null: the current school year
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [laterAssessmentPoint, setLaterAssessmentPoint] = useState(null);
   const [earlierAssessmentPoint, setEarlierAssessmentPoint] = useState(null);
-  const [laterTargetIndex, setLaterTargetIndex] = useState(0);
+  const [laterTargetIndex, setLaterTargetIndex] = useState(null);
+  const [savingTarget, setSavingTarget] = useState(false);
+  const [targetMessage, setTargetMessage] = useState('');
+  const activeView = useRef(null);
+  activeView.current = `${actor.schoolId}:${studentId}:${year}`;
 
   useEffect(() => {
     let live = true;
     setLoading(true);
     setError(null);
+    setTargetMessage('');
+    setView({ data: null, fromDevice: false, savedAt: null });
+    setComparisonOpen(false);
+    setLaterAssessmentPoint(null);
+    setEarlierAssessmentPoint(null);
+    setLaterTargetIndex(null);
     repository.loadProfile(actor.schoolId, studentId, year)
       .then((v) => live && setView(v))
       .catch((e) => live && setError(e.message))
@@ -278,16 +304,39 @@ export default function StudentProfile() {
     return () => { live = false; };
   }, [actor.schoolId, studentId, online, year]);
 
+  async function saveTarget(option_index) {
+    const profile = view.data;
+    const viewKey = activeView.current;
+    setSavingTarget(true);
+    setTargetMessage('');
+    try {
+      const { selectStudentTarget: saved } = await gql(SELECT_STUDENT_TARGET, { input: {
+        school_id: actor.schoolId, student_id: profile.student.student_id,
+        prediction_token: profile.targets.prediction_token,
+        expected_version: profile.targets.selection_version ?? 0, option_index,
+      } });
+      if (activeView.current !== viewKey) return;
+      setView((v) => {
+        if (v.data?.student.student_id !== profile.student.student_id || v.data?.targets?.prediction_token !== saved.prediction_token) return v;
+        return { ...v, data: { ...v.data,
+          targets: { ...v.data.targets, ...saved },
+          assessment_history: v.data.assessment_history?.map((entry) => entry.targets?.prediction_token === saved.prediction_token
+            ? { ...entry, targets: { ...entry.targets, ...saved } } : entry),
+        } };
+      });
+      setTargetMessage('');
+    } catch (e) {
+      if (activeView.current === viewKey) setTargetMessage(`Not saved: ${e.message}`);
+    } finally { setSavingTarget(false); }
+  }
+
   const p = view.data;
   if (error) return <div className="stack"><Link to="/dashboard">Back</Link><div className="notice">{error}</div></div>;
   if (!p) return <div className="hint">{loading ? 'Loading…' : 'This profile has not been opened on this device before, so it cannot be shown offline.'}</div>;
-  const assessmentHistory = (p.assessment_history || [])
-    .slice()
-    .sort(
-      (a, b) =>
-        CHECKPOINT_ORDER.indexOf(a.prediction.prediction_point) -
-        CHECKPOINT_ORDER.indexOf(b.prediction.prediction_point)
-    );
+  const assessmentHistory = profileAssessments(p);
+  const active = (p.student.status || 'ACTIVE') === 'ACTIVE';
+  const years = p.available_years || [];
+  const viewingPast = years.length > 0 && p.academic_year !== years[0];
 
   // The first panel defaults to the newest available prediction.
   const defaultLaterAssessment = assessmentHistory.at(-1) ?? null;
@@ -326,19 +375,10 @@ export default function StudentProfile() {
     ? CHECKPOINT_ORDER.indexOf(earlierPoint)
     : -1;
 
-  // Later panel: only checkpoints after the earlier panel's selection.
-  const laterOptions = assessmentHistory
-    .filter(
-      (a) =>
-        earlierIndex === -1 ||
-        CHECKPOINT_ORDER.indexOf(a.prediction.prediction_point) > earlierIndex
-    )
-    .slice()
-    .reverse()
-    .map((a) => ({
-      value: a.prediction.prediction_point,
-      label: a.prediction.label,
-    }));
+  // Selecting any later checkpoint automatically repairs the earlier selection.
+  const laterOptions = assessmentHistory.slice(1).reverse().map((a) => ({
+    value: a.prediction.prediction_point, label: a.prediction.label,
+  }));
 
   // Earlier panel: only checkpoints before the later panel's selection.
   const earlierOptions = assessmentHistory
@@ -354,13 +394,13 @@ export default function StudentProfile() {
       label: a.prediction.label,
     }));
 
-    // Targets are selectable only for the most recent, current prediction.
-    const canSwitchLaterTargets =
-      Boolean(laterPoint) &&
+  // Targets are selectable only for the most recent, current prediction.
+  const canSwitchLaterTargets =
+      active && !viewingPast && Boolean(laterPoint) &&
       laterPoint === p.latest?.prediction_point &&
       p.current === true;
 
-    const handleLaterAssessmentChange = (point) => {
+  const handleLaterAssessmentChange = (point) => {
     const newIndex = CHECKPOINT_ORDER.indexOf(point);
 
     // If the current earlier selection is no longer valid,
@@ -379,7 +419,7 @@ export default function StudentProfile() {
     }
 
     setLaterAssessmentPoint(point);
-    setLaterTargetIndex(0);
+    setLaterTargetIndex(null);
   };
 
   const handleEarlierAssessmentChange = (point) => {
@@ -390,11 +430,7 @@ export default function StudentProfile() {
   const riskAt = new Map(p.risk_trend.map((r) => [r.prediction_point, r.probability * 100]));
   const resultsAt = new Map(p.performance_trend.map((r) => [r.point, r]));
   const subjects = [...new Set(p.performance_trend.flatMap((r) => r.subjects.map((s) => s.subject)))];
-  const previousInterventions = p.previous ? p.interventions.filter((i) => i.linked?.prediction_point === p.previous.prediction_point) : [];
   const latest = p.latest;
-  const active = (p.student.status || 'ACTIVE') === 'ACTIVE';
-  const years = p.available_years || [];
-  const viewingPast = years.length > 0 && p.academic_year !== years[0];
 
   return (
     <div className="stack">
@@ -412,6 +448,21 @@ export default function StudentProfile() {
             Class: <b>{p.student.class_name ?? '—'}</b>
           </div>
         </div>
+
+        {p.student.status === 'GRADUATED' && <b>Graduated{p.student.graduation_year ? ` ${p.student.graduation_year}` : ''}</b>}
+        {p.student.status === 'INACTIVE' && <b className="warn">Not active</b>}
+        {years.length > 1 && (
+          <label className="choice-inline">
+            School year{' '}
+            <select value={String(p.academic_year)} onChange={(e) => setYear(Number(e.target.value) === years[0] ? null : Number(e.target.value))}>
+              {years.map((y) => <option key={y} value={String(y)}>{y}</option>)}
+            </select>
+            {p.year_class_name && <span className="hint">in {p.year_class_name}</span>}
+          </label>
+        )}
+        {active && !viewingPast && (
+          <Link className="btn primary" to={`/students/${studentId}/interventions`} state={{ from: backTo(location) }}>Log or update interventions</Link>
+        )}
 
         <div className="profile-teaching-info profile-info">
           <div>
@@ -441,28 +492,67 @@ export default function StudentProfile() {
         </div>
       )}
 
-      <div className="profile-grid assessment-comparison">
+      {p.results && !assessmentHistory.some((entry) => entry.results?.point === p.results.point) && (
+        <div className="card stack">
+          <h2>{p.results.label} (latest published results)</h2>
+          <div className="hint">These published results do not have a matching prediction in this view.</div>
+          <div className="table-wrap"><table>
+            <thead><tr><th>Subject</th><th>Result</th><th>Grade</th></tr></thead>
+            <tbody>
+              {p.results.subjects.map((subject) => <tr key={subject.subject}><td>{subject.subject}</td><td>{mark(subject.score)}</td><td>{subject.grade ?? '—'}</td></tr>)}
+              {p.results.average != null && <tr><td><b>Average</b></td><td><b>{mark(p.results.average)}</b></td><td /></tr>}
+            </tbody>
+          </table></div>
+        </div>
+      )}
+
+      {targetMessage && laterAssessment?.targets?.status === 'FOUND' && laterAssessment.targets.options.filter((option) => option.method === 'dice-random').length > 1 && <div className="notice" role="alert">{targetMessage}</div>}
+      {assessmentHistory.length > 0 && <div className="assessment-toolbar">
+        <div>
+          <h2>Assessment overview</h2>
+          <p className="hint">{comparisonOpen
+            ? 'Choose two assessment checkpoints to compare.'
+            : 'The latest available assessment for this school year.'}</p>
+        </div>
+        {assessmentHistory.length > 1 && <button type="button" className="btn assessment-compare-toggle"
+          aria-expanded={comparisonOpen} aria-controls="assessment-panels"
+          onClick={() => {
+            if (comparisonOpen) {
+              setLaterAssessmentPoint(null);
+              if (laterPoint !== p.latest?.prediction_point) setLaterTargetIndex(null);
+            }
+            setComparisonOpen((open) => !open);
+          }}>
+          {comparisonOpen ? 'Close comparison' : 'Compare with earlier assessment'}
+        </button>}
+      </div>}
+      <div id="assessment-panels" className={`profile-grid assessment-comparison${comparisonOpen ? ' is-comparing' : ''}`}>
         <AssessmentPanel
-          heading="Later Assessment"
+          heading={comparisonOpen ? "Later assessment" : active && !viewingPast && p.current ? "Current assessment" : "Latest available assessment"}
           entry={laterAssessment}
           options={laterOptions}
+          onChange={comparisonOpen ? handleLaterAssessmentChange : undefined}
           value={laterPoint ?? ''}
-          onChange={handleLaterAssessmentChange}
           targetIndex={laterTargetIndex}
           onTargetIndexChange={setLaterTargetIndex}
-          allowTargetSelection={canSwitchLaterTargets}
-          isCurrent={canSwitchLaterTargets}
+          allowTargetSelection={canSwitchLaterTargets && p.scope.all}
+          selectedOnly={!canSwitchLaterTargets || !p.scope.all}
+          onSaveTarget={canSwitchLaterTargets && p.scope.all ? saveTarget : undefined}
+          savingTarget={savingTarget}
+          targetSaveDisabled={!online || loading}
+          isCurrent={laterPoint === p.latest?.prediction_point && p.current === true}
         />
 
-        <AssessmentPanel
-          heading="Earlier Assessment"
+        {comparisonOpen && <AssessmentPanel
+          heading="Earlier assessment"
           entry={earlierAssessment}
           options={earlierOptions}
           value={earlierPoint ?? ''}
           onChange={handleEarlierAssessmentChange}
-          targetIndex={0}
+          targetIndex={earlierAssessment?.targets?.selected_option ?? 0}
           allowTargetSelection={false}
-        />
+          selectedOnly
+        />}
       </div>
 
       <div className="two-col">
@@ -492,7 +582,7 @@ export default function StudentProfile() {
             subjects={subjects}
             targetOption={
               canSwitchLaterTargets
-                ? laterAssessment?.targets?.options?.[laterTargetIndex] ?? null
+                ? laterAssessment?.targets?.options?.find((option, i) => (option.option_index ?? i) === (laterTargetIndex ?? laterAssessment.targets.selected_option ?? 0)) ?? null
                 : null
             }
           />

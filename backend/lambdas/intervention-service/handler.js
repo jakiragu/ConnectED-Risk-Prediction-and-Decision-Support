@@ -118,7 +118,10 @@ async function saveIntervention(actor, input) {
   if (patch.factor !== existing.factor && existing.linked) {
     // Same prediction it responded to; the target becomes the one set for the new factor at that time.
     const prediction = year.predictions.find((p) => p.prediction_point === existing.linked.prediction_point);
-    patch.linked = { ...existing.linked, target: prediction ? linkFor(prediction, patch.factor).target : null };
+    const savedChange = existing.linked.target_changes?.find((c) => c.group === patch.factor);
+    patch.linked = { ...existing.linked, target: existing.linked.target_changes
+      ? (savedChange ? { ...savedChange, method: existing.linked.target?.method ?? null } : null)
+      : prediction ? linkFor(prediction, patch.factor).target : null };
   }
   const updated = await interventions.update(input.school_id, existing, patch, input._version, actor);
   if (methodKey(patch.method) !== methodKey(existing.method) || patch.factor !== existing.factor) {
