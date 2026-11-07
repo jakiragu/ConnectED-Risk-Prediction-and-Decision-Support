@@ -5,11 +5,19 @@ import { ddb } from '../backend/library/client.js';
 import { TABLE, pk, sk, gsi1, gsi2, gsi3 } from '../backend/library/keys.js';
 import { ensureTable } from './create-table.js';
 import * as identity from '../backend/library/identity.js';
+import { seedPublishedHistory } from './seed-history.js';
+import { attendancePeriods, termStatus, todayIn } from '../backend/library/calendar.js';
 import * as platformIdentity from '../backend/library/platformIdentity.js';
 import { putStaff, registrationItems } from '../backend/library/platformStore.js';
 import { DEFAULT_ASSESSMENT_SCHEME } from '../backend/library/assessmentConfig.js';
 import { pathToFileURL } from 'node:url';
 
+const seedStartedAt = Date.now();
+
+function progress(message) {
+  const elapsed = ((Date.now() - seedStartedAt) / 1000).toFixed(1);
+  console.log(`[seed +${elapsed}s] ${message}`);
+}
 
 const DEV_PASSWORD = process.env.SEED_PASSWORD || 'Gradebook-Dev-2026!';
 const SCHOOL = 'sch_saint_innocent';
@@ -51,6 +59,73 @@ const rnd = () =>
   ((seedState = (seedState * 1103515245 + 12345) % 2147483648) /
     2147483648);
 const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+
+// Marks and attendance use their own per-class generator, so student names
+// (drawn from rnd above) stay exactly as before and each class gets its own data.
+function hashString(text) {
+  let h = 2166136261;
+  for (const ch of text) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function rngFor(key) {
+  let a = hashString(key);
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const between = (r, lo, hi) => lo + r() * (hi - lo);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+const PROFILE_SLOTS = [
+  { kind: 'strong', count: 4, level: [74, 88], trend: [-1, 1], attendance: [0.90, 0.98], attTrend: 0 },
+  { kind: 'solid', count: 5, level: [60, 72], trend: [-1, 1], attendance: [0.85, 0.95], attTrend: 0 },
+  { kind: 'borderline', count: 4, level: [47, 56], trend: [-1.5, 1.5], attendance: [0.78, 0.90], attTrend: 0 },
+  { kind: 'declining', count: 3, level: [60, 66], trend: [-6, -4], attendance: [0.88, 0.94], attTrend: -0.04 },
+  { kind: 'improving', count: 2, level: [38, 44], trend: [3, 5], attendance: [0.72, 0.80], attTrend: 0.03 },
+  { kind: 'weak', count: 2, level: [32, 42], trend: [-1, 1], attendance: [0.65, 0.80], attTrend: 0 },
+];
+
+function classProfiles(classId, size, subjectCount) {
+  const r = rngFor(`marks:${classId}`);
+  const slots = PROFILE_SLOTS.flatMap((p) => Array.from({ length: p.count }, () => p));
+  for (let i = slots.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [slots[i], slots[j]] = [slots[j], slots[i]];
+  }
+  const classOffset = between(r, -4, 4);
+  const profiles = slots.slice(0, size).map((slot) => {
+    const affinity = Array.from({ length: subjectCount }, () => between(r, -5, 5));
+    // Some middle and borderline students have one clearly weak subject.
+    if ((slot.kind === 'solid' || slot.kind === 'borderline') && r() < 0.35) {
+      affinity[Math.floor(r() * subjectCount)] -= 14;
+    }
+    return {
+      kind: slot.kind,
+      level: between(r, ...slot.level) + classOffset,
+      trend: between(r, ...slot.trend),
+      affinity,
+      attendance: between(r, ...slot.attendance),
+      attTrend: slot.attTrend,
+    };
+  });
+  return { profiles, r };
+}
+
+const markFor = (profile, subjectIndex, checkpointIndex, r) =>
+  clamp(Math.round(profile.level + profile.trend * checkpointIndex
+    + profile.affinity[subjectIndex] + between(r, -5, 5)), 0, 100);
+
+const attendanceRateFor = (profile, checkpointIndex, r) =>
+  clamp(profile.attendance + profile.attTrend * checkpointIndex + between(r, -0.02, 0.02), 0.5, 1);
 
 const items = [];
 const now = new Date().toISOString();
@@ -129,11 +204,11 @@ const TERMS = [
     term_number: 1,
     start_date: '2026-01-05',
     mid_term_date: '2026-02-20',
-    end_date: '2026-04-03',
-    status: 'PAST',
+    // Term 1 closes on the last teaching day before Good Friday (3 April), so
+    // End-term publication does not fall on a public holiday.
+    end_date: '2026-04-02',
     closures: [
       { from: '2026-02-26', to: '2026-03-01', label: 'Half-term break' },
-      { from: '2026-04-03', to: '2026-04-03', label: 'Good Friday' },
     ],
   },
   {
@@ -144,7 +219,6 @@ const TERMS = [
     start_date: '2026-05-04',
     mid_term_date: '2026-06-19',
     end_date: '2026-08-07',
-    status: 'CURRENT',
     closures: [
       { from: '2026-06-01', to: '2026-06-01', label: 'Madaraka Day' },
       { from: '2026-06-25', to: '2026-06-28', label: 'Half-term break' },
@@ -158,14 +232,16 @@ const TERMS = [
     start_date: '2026-08-31',
     mid_term_date: '2026-09-25',
     end_date: '2026-10-30',
-    status: 'UPCOMING',
     closures: [
       { from: '2026-10-20', to: '2026-10-20', label: 'Mashujaa Day' },
     ],
   },
 ];
 
+// Use main's calendar rules; seeding does not force a current term.
+const seedToday = todayIn(process.env.SCHOOL_TIME_ZONE || 'Africa/Nairobi');
 for (const term of TERMS) {
+  term.status = termStatus(term, seedToday);
   items.push({
     PK: pk(SCHOOL),
     SK: sk.gradeRule(term.term_id),
@@ -176,6 +252,8 @@ for (const term of TERMS) {
     pass_mark: 50,
     missing_score_policy: 'EXCLUDE',
     bands: BANDS,
+    checkpoint_weights: { OPENER: 0, MIDTERM: 30, ENDTERM: 70 },
+    opener_enabled: false,
     checkpoint_weights_version: 0,
     updated_at: now,
   });
@@ -208,17 +286,39 @@ for (const form of [2, 4]) {
       grade: `Form ${form}`,
       stream,
       year: 2026,
-      status: 'CURRENT',
-      _version: 1,
+        _version: 1,
     });
   }
 }
 
-// Dedicated five-student test class.
+// Dedicated test class (also 20 students).
 const TEST_CLASS = {
   classId: 'cls_test',
   name: 'Form 4 Test',
 };
+
+// Deliberately missing T2M entries for the live gradebook demonstration.
+const T2M_DEMO_MISSING = {
+  scores: [
+    { student_id: 'stu_19001', subject: 'Kiswahili' },
+    { student_id: 'stu_19004', subject: 'Kiswahili' },
+  ],
+  attendance: [
+    'stu_19001',
+    'stu_19003',
+    'stu_19005',
+  ],
+};
+
+const isMissingDemoScore = (studentId, subject) =>
+  T2M_DEMO_MISSING.scores.some(
+    (entry) =>
+      entry.student_id === studentId &&
+      entry.subject === subject
+  );
+
+const isMissingDemoAttendance = (studentId) =>
+  T2M_DEMO_MISSING.attendance.includes(studentId);
 
 items.push({
   PK: pk(SCHOOL),
@@ -322,7 +422,7 @@ let adm = 17000;
 const students = [];
 
 for (const c of classes) {
-  const size = 38 + Math.floor(rnd() * 6);
+  const size = 20 - named.filter((n) => n.classId === c.classId).length;
 
   for (let i = 0; i < size; i++) {
     students.push({
@@ -351,6 +451,7 @@ const TEST_STUDENTS = [
   ['Cynthia', 'Wanjiku'],
   ['David', 'Mutua'],
   ['Esther', 'Chebet'],
+  ...Array.from({ length: 15 }, (_, i) => [FIRST[i], LAST[(i + 5) % LAST.length]]),
 ];
 
 TEST_STUDENTS.forEach(([first_name, last_name], i) => {
@@ -388,12 +489,11 @@ for (const student of students) {
 
 /**
  * Creates one assessment for each model subject at each requested checkpoint,
- * then adds a score for every student in Form 4 Test.
+ * then adds scores and calendar-based attendance for every class.
  *
- * These are ordinary Assessment and Score records. No result calculation or
- * publication is performed here.
+ * Publication and model inference follow after these records are persisted.
  */
-function seedTestAssessmentsAndScores(enteredBy) {
+function seedAssessmentsAndScores(enteredBy) {
   const checkpoints = [
     {
       point: 'T1M',
@@ -413,41 +513,80 @@ function seedTestAssessmentsAndScores(enteredBy) {
       assessment_type: 'MIDTERM',
       title: 'Term 2 Midterm',
     },
-    {
-      point: 'T2F',
-      term_id: 'term_2026_2',
-      assessment_type: 'ENDTERM',
-      title: 'Term 2 Endterm',
-    },
-    {
-      point: 'T3M',
-      term_id: 'term_2026_3',
-      assessment_type: 'MIDTERM',
-      title: 'Term 3 Midterm',
-    },
+    // {
+    //   point: 'T2F',
+    //   term_id: 'term_2026_2',
+    //   assessment_type: 'ENDTERM',
+    //   title: 'Term 2 Endterm',
+    // },
+    // {
+    //   point: 'T3M',
+    //   term_id: 'term_2026_3',
+    //   assessment_type: 'MIDTERM',
+    //   title: 'Term 3 Midterm',
+    // },
   ];
 
   let assessmentCount = 0;
   let scoreCount = 0;
 
-  // Each student gets a consistent general performance profile, with small
-  // subject/checkpoint variations. All scores are valid percentages out of 100.
-  const studentBase = [43, 56, 68, 79, 91];
-
+  for (const classId of allClassIds) {
+  const roster = students.filter((s) => s.class_id === classId);
+  const { profiles, r } = classProfiles(classId, roster.length, MODEL_SUBJECTS.length);
   checkpoints.forEach((checkpoint, checkpointIndex) => {
+    const term = TERMS.find((t) => t.term_id === checkpoint.term_id);
+    const period = attendancePeriods(term).find((p) => p.period === checkpoint.assessment_type);
+    checkpoint.due_date = period.to;
+    const createdAt = `${period.from}T06:00:00.000Z`;
+    const enteredAt = `${period.to}T09:00:00.000Z`;
+    roster.forEach((student, i) => {
+      // Leave selected T2M attendance records empty in the test class.
+      if (
+        checkpoint.point === 'T2M' &&
+        classId === TEST_CLASS.classId &&
+        isMissingDemoAttendance(student.student_id)
+      ) {
+        return;
+      }
+
+      items.push({
+        PK: pk(SCHOOL),
+        SK: sk.attendance(term.term_id, period.period, student.student_id),
+        GSI2PK: gsi2.pk(SCHOOL, student.student_id),
+        GSI2SK: gsi2.attendance(2026, term.term_number, period.period),
+        entity: 'Attendance',
+        school_id: SCHOOL,
+        student_id: student.student_id,
+        class_id: classId,
+        term_id: term.term_id,
+        academic_year: 2026,
+        term_number: term.term_number,
+        period: period.period,
+        days_attended: Math.round(
+          period.school_days * attendanceRateFor(profiles[i], checkpointIndex, r)
+        ),
+        days_excused: 0,
+        school_days_when_entered: period.school_days,
+        recorded_by: enteredBy,
+        recorded_by_name: 'John Man',
+        recorded_at: enteredAt,
+        _version: 1,
+        _lastChangedAt: Date.parse(enteredAt),
+      });
+    });
     MODEL_SUBJECTS.forEach((subject, subjectIndex) => {
       const assessmentId =
-        `seed_${checkpoint.point}_${subject.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        `seed_${classId}_${checkpoint.point}_${subject.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
       const assessment = {
         PK: pk(SCHOOL),
         SK: sk.assessment(assessmentId),
-        GSI1PK: gsi1.pk(SCHOOL, TEST_CLASS.classId),
+        GSI1PK: gsi1.pk(SCHOOL, classId),
         GSI1SK: gsi1.assessment(checkpoint.term_id, assessmentId),
         entity: 'Assessment',
         assessment_id: assessmentId,
         school_id: SCHOOL,
-        class_id: TEST_CLASS.classId,
+        class_id: classId,
         term_id: checkpoint.term_id,
         subject,
         title: `${subject} - ${checkpoint.title}`,
@@ -456,13 +595,21 @@ function seedTestAssessmentsAndScores(enteredBy) {
         weight: 100,
         max_score: 100,
         due_date: checkpoint.due_date,
-        score_count: TEST_STUDENTS.length,
-        created_at: now,
-        updated_at: now,
+        score_count: roster.length - (
+          checkpoint.point === 'T2M' && classId === TEST_CLASS.classId
+            ? T2M_DEMO_MISSING.scores.filter(
+                (entry) =>
+                  entry.subject === subject &&
+                  roster.some((student) => student.student_id === entry.student_id)
+              ).length
+            : 0
+        ),
+        created_at: createdAt,
+        updated_at: enteredAt,
         created_by: enteredBy,
         updated_by: enteredBy,
         _version: 1,
-        _lastChangedAt: Date.now(),
+        _lastChangedAt: Date.parse(enteredAt),
         _deleted: false,
       };
 
@@ -474,14 +621,14 @@ function seedTestAssessmentsAndScores(enteredBy) {
         PK: pk(SCHOOL),
         SK: sk.paperSlot(
           checkpoint.term_id,
-          TEST_CLASS.classId,
+          classId,
           subject,
           checkpoint.assessment_type,
           1
         ),
         entity: 'PaperSlot',
         school_id: SCHOOL,
-        class_id: TEST_CLASS.classId,
+        class_id: classId,
         term_id: checkpoint.term_id,
         subject,
         assessment_type: checkpoint.assessment_type,
@@ -491,40 +638,43 @@ function seedTestAssessmentsAndScores(enteredBy) {
 
       assessmentCount++;
 
-      TEST_STUDENTS.forEach((_, studentIndex) => {
-        const studentId = `stu_${19001 + studentIndex}`;
+      roster.forEach((student, studentIndex) => {
+        const studentId = student.student_id;
 
-        // The pattern varies by checkpoint and subject but stays deterministic.
-        const variation =
-          ((subjectIndex * 7 + checkpointIndex * 5 + studentIndex * 3) % 17) - 8;
-        const rawScore = Math.max(
-          0,
-          Math.min(100, studentBase[studentIndex] + variation)
-        );
+        // Leave selected T2M marks empty in the test class.
+        if (
+          checkpoint.point === 'T2M' &&
+          classId === TEST_CLASS.classId &&
+          isMissingDemoScore(studentId, subject)
+        ) {
+          return;
+        }
+
+        const rawScore = markFor(profiles[studentIndex], subjectIndex, checkpointIndex, r);
         const normalizedScore = Math.round(rawScore * 100) / 100;
-        const timestamp = Date.now();
+        const timestamp = Date.parse(enteredAt);
 
         items.push({
           PK: pk(SCHOOL),
           SK: sk.score(assessmentId, studentId),
           GSI2PK: gsi2.pk(SCHOOL, studentId),
           GSI2SK: gsi2.score(checkpoint.term_id, assessmentId),
-          GSI3PK: gsi3.pk(SCHOOL, TEST_CLASS.classId),
+          GSI3PK: gsi3.pk(SCHOOL, classId),
           GSI3SK: gsi3.sk(timestamp),
           entity: 'Score',
           score_id: `${assessmentId}#${studentId}`,
           school_id: SCHOOL,
           assessment_id: assessmentId,
           student_id: studentId,
-          class_id: TEST_CLASS.classId,
+          class_id: classId,
           term_id: checkpoint.term_id,
           raw_score: rawScore,
           normalized_score: normalizedScore,
           mark_status: 'SCORED',
           status: 'ACTIVE',
           entered_by: enteredBy,
-          entered_at: now,
-          updated_at: now,
+          entered_at: enteredAt,
+          updated_at: enteredAt,
           _version: 1,
           _lastChangedAt: timestamp,
           _deleted: false,
@@ -535,6 +685,7 @@ function seedTestAssessmentsAndScores(enteredBy) {
     });
   });
 
+  }
   return { assessmentCount, scoreCount };
 }
 
@@ -559,6 +710,9 @@ async function account(teacher) {
 }
 
 async function batchWriteAll(allItems) {
+  const totalBatches = Math.ceil(allItems.length / 25);
+  let completedBatches = 0;
+
   for (let i = 0; i < allItems.length; i += 25) {
     let pending = allItems.slice(i, i + 25).map((Item) => ({
       PutRequest: { Item },
@@ -583,15 +737,25 @@ async function batchWriteAll(allItems) {
 
       pending = result.UnprocessedItems?.[TABLE] || [];
     }
+    
+    completedBatches++;
+
+    if (completedBatches % 20 === 0 || completedBatches === totalBatches) {
+      progress(`Database writes: ${completedBatches}/${totalBatches} batches completed.`);
+    }
   }
 }
 
 async function run() {
+  progress('Starting database setup...');
   await ensureTable({ reset: process.argv.includes('--reset') });
+  progress('Database setup complete.');
 
   const subs = {};
   for (const teacher of TEACHERS) {
+    progress(`Creating account: ${teacher.email}`);
     subs[teacher.key] = await account(teacher);
+    progress('Teacher accounts created.');
   }
 
   for (const teacher of TEACHERS) {
@@ -619,8 +783,11 @@ async function run() {
     }
   }
 
-  const seeded = seedTestAssessmentsAndScores(subs.john);
+  progress('Generating assessments, scores and attendance...');
+  const seeded = seedAssessmentsAndScores(subs.john);
+  progress(`Generated ${items.length} records in memory.`);
 
+  progress(`Writing ${items.length} records to DynamoDB...`);
   let angaza = null;
   if (process.env.PLATFORM_COGNITO_USER_POOL_ID) {
     const acct = await platformIdentity.createStaffAccount({
@@ -633,17 +800,33 @@ async function run() {
   }
 
   await batchWriteAll(items);
+  progress('Initial database write complete.');
+  const staff = TEACHERS.map((t) => ({
+    sub: subs[t.key],
+    name: `${t.first_name} ${t.last_name}`,
+    role: t.role,
+    assignments: t.assignments,
+    class_teacher_of: t.class_teacher_of,
+  }));
+  progress('Starting historical result publication and risk predictions...');
+  const riskSummary = await seedPublishedHistory({
+    schoolId: SCHOOL, terms: TERMS, classIds: allClassIds, items, staff,
+    subjects: MODEL_SUBJECTS, actor: { sub: subs.john, name: 'John Man' },
+  });
+  progress('Historical publication and risk predictions complete.');
 
   console.log(`Seeded ${items.length} items into ${TABLE}`);
   console.log(`  school        ${SCHOOL}`);
-  console.log(`  default term  ${TERM}`);
+
   console.log(`  classes       ${classes.length + 1}`);
   console.log(`  students      ${students.length}`);
   console.log(`  test class    ${TEST_CLASS.name} (${TEST_CLASS.classId})`);
   console.log(`  assessments   ${seeded.assessmentCount}`);
   console.log(`  score records ${seeded.scoreCount}`);
-  console.log('  attendance    0 seeded');
-  console.log('  publications  0 seeded');
+  console.log(`  attendance    ${items.filter((i) => i.entity === 'Attendance').length}`);
+  console.log(`  publications  ${allClassIds.length * 2} (with model predictions and SHAP)`);
+  console.log(`  flagged       ${riskSummary.flagged} (counterfactuals: ${JSON.stringify(riskSummary.counterfactuals)})`);
+  console.log(`  interventions ${riskSummary.interventions}`);
 
   console.log(`\nSign-in accounts (password ${DEV_PASSWORD}):`);
   for (const teacher of TEACHERS) {
@@ -670,4 +853,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 
-export { SCHOOL, TERM, janeClasses, classes, students };
+export { SCHOOL, TERM, TERMS, janeClasses, classes, students };

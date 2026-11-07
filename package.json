@@ -12,6 +12,7 @@
     "db:create": "node local/create-table.js",
     "db:reset": "node local/create-table.js --reset",
     "db:seed": "node local/seed.js --reset",
+    "db:seed:interventions": "node local/seed-interventions.js",
     "db:verify": "node local/verify.js",
     "aws:setup": "node local/setup-aws.js",
     "api": "node local/server.js",
