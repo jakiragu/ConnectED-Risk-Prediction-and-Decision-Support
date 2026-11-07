@@ -1436,11 +1436,16 @@ type DashboardIntervention {
   intervention_id: ID!
   student_id: ID!
   student_name: String!
+  admission_no: String
+  class_id: ID
   class_name: String
   factor: String!
   method: String!
   frequency: InterventionFrequency!
   started_on: AWSDate!
+  created_by: ID
+  created_by_name: String         # the teacher who logged it (their current name)
+  assigned_by_me: Boolean!        # logged by the person viewing the dashboard
 }
 
 type DashboardAssessment {
@@ -1460,6 +1465,7 @@ type RiskDashboard {
   classes: Int!
   students: Int!
   at_risk: Int!
+  viewer_is_class_teacher: Boolean!   # class teacher of at least one class shown (not an administrator)
   at_risk_students: [DashboardAtRisk!]!
   ongoing_interventions: [DashboardIntervention!]!
   pending_assessments: [DashboardAssessment!]!
@@ -1489,6 +1495,7 @@ type SchoolRiskOverview {
   classes: [RiskGroupRow!]!
   interventions_ongoing: Int!
   interventions_logged: Int!
+  students_with_interventions: Int!
 }
 
 # ------------------------------------------------------------ year-end promotion

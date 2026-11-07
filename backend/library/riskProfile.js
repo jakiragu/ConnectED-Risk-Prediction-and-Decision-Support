@@ -84,7 +84,7 @@ export function linkFor(prediction, factor) {
 }
 
 /** The intervention as the screens show it, with its descriptive outcome. */
-export function interventionView(item, year) {
+export function interventionView(item, year, names = null) {
   const series = year ? factorSeries(item.factor, year.results, year.predictions) : new Map();
   return {
     intervention_id: item.intervention_id,
@@ -101,9 +101,10 @@ export function interventionView(item, year) {
     linked: item.linked ?? null,
     outcome: year && item.linked ? outcomeOf(item, series, year.predictions) : null,
     created_by: item.created_by,
-    created_by_name: item.created_by_name ?? null,
+    // The teacher's current name when known, else the name saved with the record.
+    created_by_name: names?.get(item.created_by) ?? item.created_by_name ?? null,
     created_at: item.created_at,
-    updated_by_name: item.updated_by_name ?? null,
+    updated_by_name: names?.get(item.updated_by) ?? item.updated_by_name ?? null,
     updated_at: item.updated_at,
     _version: item._version,
   };
@@ -124,9 +125,12 @@ export async function studentContext(actor, schoolId, studentId, academicYear = 
 
 /** A student's interventions the actor may see, newest first, each with its outcome. */
 export async function visibleInterventions(schoolId, studentId, scope, year) {
-  const items = await interventions.listForStudent(schoolId, studentId);
+  const [items, names] = await Promise.all([
+    interventions.listForStudent(schoolId, studentId),
+    platform.teacherNames(schoolId),
+  ]);
   return items
     .filter((i) => canSeeFactor(scope, i.factor))
-    .map((i) => interventionView(i, year))
+    .map((i) => interventionView(i, year, names))
     .sort((a, b) => String(b.started_on).localeCompare(String(a.started_on)) || String(b.created_at).localeCompare(String(a.created_at)));
 }

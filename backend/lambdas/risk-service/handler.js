@@ -56,6 +56,18 @@ export async function handler(event) {
 
 const zone = () => process.env.SCHOOL_TIME_ZONE || 'Africa/Nairobi';
 
+// The scorer's description of the published model changes only when a model is
+// published, but asking for it starts the Python scorer (often a cold start), so
+// it is kept for a few minutes in this warm Lambda instead of fetched every view.
+const DESCRIBE_TTL_MS = 5 * 60 * 1000;
+let described = null;
+async function describeModel() {
+  if (described && Date.now() - described.at < DESCRIBE_TTL_MS) return described.value;
+  const value = await invoke(scorerFunction(), { action: 'describe' });
+  described = { at: Date.now(), value };
+  return value;
+}
+
 function requirePoint(point) {
   if (!POINT_NAMES.includes(point)) throw validation(`Prediction point must be one of ${POINT_NAMES.join(', ')}`, 'prediction_point');
   return point;
@@ -116,9 +128,9 @@ async function listRiskPredictions(actor, { school_id, class_id, prediction_poin
   const year = await yearFor(school_id, point, academic_year);
   if (!year) return [];
   const items = await risk.listForClass(school_id, year, point, class_id);
-  const students = await Promise.all(items.map((p) => platform.student(school_id, p.student_id)));
+  const students = await platform.studentsByIds(school_id, items.map((p) => p.student_id));
   return items
-    .map((p, i) => predictionView(p, students[i]))
+    .map((p) => predictionView(p, students.get(p.student_id)))
     .sort((a, b) => String(a.admission_no).localeCompare(String(b.admission_no), undefined, { numeric: true }));
 }
 
@@ -170,7 +182,7 @@ async function getRiskImportance(actor, { school_id, prediction_point, academic_
   let model = null;
   let modelVersion = null;
   try {
-    const m = await invoke(scorerFunction(), { action: 'describe' });
+    const m = await describeModel();
     modelVersion = m.model_version;
     const g = m.points.find((x) => x.point === point)?.global_importance;
     if (g) {
@@ -214,7 +226,7 @@ async function getRiskRun(actor, { school_id, class_id, term_id, checkpoint }) {
 async function getRiskModel(actor) {
   assertAdmin(actor);
   try {
-    const m = await invoke(scorerFunction(), { action: 'describe' });
+    const m = await describeModel();
     return { available: true, message: null, ...m, points: m.points.map(({ global_importance, ...rest }) => rest) };
   } catch (e) {
     return { available: false, message: e.message, model_version: null, points: [] };

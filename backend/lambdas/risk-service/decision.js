@@ -1,7 +1,7 @@
-import { assertAdmin, isAdmin, readableClassIds, subjectsITeach } from '../../library/authz.js';
+import { assertAdmin, isAdmin, isClassTeacherOf, readableClassIds, subjectsITeach } from '../../library/authz.js';
 import { recordingStatus, SUBJECTS } from '../../library/assessment.js';
 import { termStatus, todayIn } from '../../library/calendar.js';
-import { canSeeFactor, CHECKPOINT_ORDER, INTERVENTION_STATUS, pointIndex, scopeFactors, scopeTargets, scopeView } from '../../library/decisionSupport.js';
+import { canSeeFactor, CHECKPOINT_ORDER, INTERVENTION_STATUS, interventionsThatConcern, pointIndex, scopeFactors, scopeTargets, scopeView } from '../../library/decisionSupport.js';
 import { explain } from '../../library/explanations.js';
 import { POINT_NAMES } from '../../library/features.js';
 import { CHECKPOINT_LABEL, selectedChanges } from '../../library/targets.js';
@@ -190,74 +190,78 @@ export async function getRiskDashboard(actor, { school_id }) {
   const inYear = (c) => (year == null || c.year == null ? c.status !== 'PAST' : Number(c.year) === Number(year));
   const classes = allClasses.filter((c) => (ids ? ids.has(c.class_id) : c.status !== 'PAST') && inYear(c));
   const currentTerm = terms.find((t) => Number(t.academic_year) === Number(year) && termStatus(t, today) === 'CURRENT') ?? null;
-  const latest = await latestByStudent(school_id, year);
+  const [latest, names] = await Promise.all([latestByStudent(school_id, year), platform.teacherNames(school_id)]);
 
-  const atRisk = [];
-  const ongoing = [];
-  const pending = [];
-  let students = 0;
-  let flagged = 0;
-
-  for (const klass of classes) {
+  // Classes are read side by side rather than one after another: each needs its
+  // roster, interventions and papers, and waiting for every class in turn was
+  // most of the dashboard's load time.
+  const perClass = await Promise.all(classes.map(async (klass) => {
     const scope = scopeFor(actor, klass.class_id);
-    const [roster, logged] = await Promise.all([
+    const subjects = currentTerm ? (isAdmin(actor) ? new Set(SUBJECTS) : new Set(subjectsITeach(actor, klass.class_id))) : new Set();
+    const [roster, logged, papers] = await Promise.all([
       platform.listStudents(school_id, klass.class_id),
       scope ? interventions.listForClass(school_id, klass.class_id) : [],
+      subjects.size ? assessments.listAllLive(school_id, klass.class_id, currentTerm.term_id) : [],
     ]);
-    const names = new Map(roster.map((s) => [s.student_id, s]));
+    const byId = new Map(roster.map((s) => [s.student_id, s]));
+    const out = { students: 0, flagged: 0, atRisk: [], ongoing: [], pending: [] };
 
     if (scope) {
-      students += roster.length;
-      const mine = logged.filter((i) => canSeeFactor(scope, i.factor) && i.status === INTERVENTION_STATUS.ONGOING && names.has(i.student_id));
-      for (const i of mine) {
-        const s = names.get(i.student_id);
-        ongoing.push({
+      out.students = roster.length;
+      // What concerns this person: every subject for the class teacher and administrators,
+      // only their own subjects for a subject teacher, whoever logged it.
+      const visible = interventionsThatConcern(scope, logged, byId);
+      for (const i of visible) {
+        const s = byId.get(i.student_id);
+        out.ongoing.push({
           intervention_id: i.intervention_id, student_id: i.student_id, student_name: `${s.first_name} ${s.last_name}`,
-          class_name: klass.name, factor: i.factor, method: i.method, frequency: i.frequency, started_on: i.started_on,
+          admission_no: s.admission_no ?? null, class_id: klass.class_id, class_name: klass.name,
+          factor: i.factor, method: i.method, frequency: i.frequency, started_on: i.started_on,
+          created_by: i.created_by ?? null,
+          created_by_name: names.get(i.created_by) ?? i.created_by_name ?? null,
+          assigned_by_me: Boolean(i.created_by) && i.created_by === actor.sub,
         });
       }
       for (const s of roster) {
         const p = latest.get(s.student_id);
         if (!p?.at_risk) continue;
-        flagged += 1;
-        atRisk.push({
+        out.flagged += 1;
+        out.atRisk.push({
           student: studentView(s, klass),
           latest: summary(p),
           targets: bestChanges(p, scope),
           partial: !scope.all,
           // What the viewer may log an intervention for, so several students can be chosen at once.
           factors: scopeView(scope).factors,
-          interventions: mine.filter((i) => i.student_id === s.student_id).map((i) => i.method),
+          interventions: visible.filter((i) => i.student_id === s.student_id).map((i) => i.method),
         });
       }
     }
 
     // Papers this person enters marks for, still being recorded this term.
-    if (currentTerm) {
-      const subjects = isAdmin(actor) ? new Set(SUBJECTS) : new Set(subjectsITeach(actor, klass.class_id));
-      if (subjects.size) {
-        const papers = await assessments.listAllLive(school_id, klass.class_id, currentTerm.term_id);
-        for (const a of papers.filter((x) => subjects.has(x.subject))) {
-          const status = recordingStatus(a, roster.length);
-          if (status !== 'UNRECORDED' && status !== 'RECORDING') continue;
-          pending.push({
-            assessment_id: a.assessment_id, class_name: klass.name, subject: a.subject, title: a.title,
-            assessment_type: a.assessment_type, status, missing: Math.max(roster.length - (a.score_count || 0), 0), due_date: a.due_date ?? null,
-          });
-        }
-      }
+    for (const a of papers.filter((x) => subjects.has(x.subject))) {
+      const status = recordingStatus(a, roster.length);
+      if (status !== 'UNRECORDED' && status !== 'RECORDING') continue;
+      out.pending.push({
+        assessment_id: a.assessment_id, class_name: klass.name, subject: a.subject, title: a.title,
+        assessment_type: a.assessment_type, status, missing: Math.max(roster.length - (a.score_count || 0), 0), due_date: a.due_date ?? null,
+      });
     }
-  }
+    return out;
+  }));
 
+  const all = (key) => perClass.flatMap((c) => c[key]);
   return {
     academic_year: year,
     term_name: currentTerm?.name ?? null,
     classes: classes.length,
-    students,
-    at_risk: flagged,
-    at_risk_students: atRisk.sort((a, b) => b.latest.probability - a.latest.probability),
-    ongoing_interventions: ongoing.sort((a, b) => String(b.started_on).localeCompare(String(a.started_on))),
-    pending_assessments: pending,
+    students: perClass.reduce((n, c) => n + c.students, 0),
+    at_risk: perClass.reduce((n, c) => n + c.flagged, 0),
+    // Decides which interventions the dashboard opens on: a class teacher starts with the ones they logged.
+    viewer_is_class_teacher: !isAdmin(actor) && classes.some((c) => isClassTeacherOf(actor, c.class_id)),
+    at_risk_students: all('atRisk').sort((a, b) => b.latest.probability - a.latest.probability),
+    ongoing_interventions: all('ongoing').sort((a, b) => String(b.started_on).localeCompare(String(a.started_on))),
+    pending_assessments: all('pending'),
   };
 }
 
@@ -300,9 +304,12 @@ export async function getSchoolRiskOverview(actor, { school_id, academic_year })
 
   const classRows = groupRows((p) => p.class_id ?? null, (id) => classById.get(id)?.name ?? id);
   const counts = await Promise.all(classRows.map((r) => interventions.listForClass(school_id, r.key)));
+  const helped = new Set();
   classRows.forEach((r, i) => {
-    r.interventions_ongoing = counts[i].filter((x) => x.status === INTERVENTION_STATUS.ONGOING).length;
+    const ongoing = counts[i].filter((x) => x.status === INTERVENTION_STATUS.ONGOING);
+    r.interventions_ongoing = ongoing.length;
     r.interventions_logged = counts[i].length;
+    for (const x of ongoing) helped.add(x.student_id);
   });
   const formRows = groupRows((p) => classById.get(p.class_id)?.grade ?? null, (g) => String(g)); // grade is already "Form 4"
 
@@ -313,6 +320,8 @@ export async function getSchoolRiskOverview(actor, { school_id, academic_year })
     classes: classRows,
     interventions_ongoing: classRows.reduce((s, r) => s + r.interventions_ongoing, 0),
     interventions_logged: classRows.reduce((s, r) => s + r.interventions_logged, 0),
+    // One student usually has several interventions (one per subject), so the count of students is shown beside it.
+    students_with_interventions: helped.size,
     checkpoints: CHECKPOINT_ORDER,
   };
 }

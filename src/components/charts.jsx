@@ -19,13 +19,19 @@ export function useWidth() {
   return [ref, width];
 }
 
-/** A chart's frame: title, one line saying what it shows, the chart, and its legend. */
-export function ChartCard({ title, subtitle, legend, children, className = '' }) {
+/**
+ * A chart's frame: title, one line saying what it shows, the chart, and its legend.
+ * actions (optional) sits at the right of the title, for a chart's own controls.
+ */
+export function ChartCard({ title, subtitle, legend, actions = null, children, className = '' }) {
   return (
     <section className={`chart-card ${className}`}>
-      <header>
-        <h3>{title}</h3>
-        {subtitle && <p className="chart-sub">{subtitle}</p>}
+      <header className={actions ? 'with-actions' : undefined}>
+        <div>
+          <h3>{title}</h3>
+          {subtitle && <p className="chart-sub">{subtitle}</p>}
+        </div>
+        {actions && <div className="chart-actions">{actions}</div>}
       </header>
       <div className="chart-body">{children}</div>
       {legend?.length > 0 && (

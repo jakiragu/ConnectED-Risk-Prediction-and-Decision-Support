@@ -82,6 +82,7 @@ test('backend history scopes subjects and associates interventions by both year 
     if (prefix === sk.termPrefix()) return { Items: terms };
     if (prefix === sk.studentResultPrefix('s')) return { Items: history };
     if (prefix === sk.interventionStudentPrefix('s')) return { Items: interventions };
+    if (prefix === sk.teacherPrefix()) return { Items: [] }; // intervention creators are named from teacher records
     for (const year of [2025, 2026]) for (const point of ['T1M', 'T1F', 'T2M', 'T2F', 'T3M']) {
       if (input.Key?.SK === sk.risk(year, point, 's')) {
         assert.equal(input.ConsistentRead, true);

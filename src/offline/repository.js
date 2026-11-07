@@ -21,9 +21,15 @@ import {
 /**
  * A read that still works offline: from the server when it can be reached
  * (and kept on this device), otherwise the copy kept last time.
+ * onCached, when given, receives the device copy before the server is asked, so
+ * a page can show it at once instead of a blank screen while the request runs.
  * @returns {Promise<{data:any, savedAt:string|null, fromDevice:boolean}>}
  */
-async function readThrough(key, fetch) {
+async function readThrough(key, fetch, onCached = null) {
+  if (onCached) {
+    const kept = await db().cache.get(key);
+    if (kept) onCached({ data: kept.value, savedAt: kept.saved_at, fromDevice: true, refreshing: true });
+  }
   const fresh = await quietly(fetch);
   if (fresh != null) {
     const savedAt = new Date().toISOString();
@@ -113,8 +119,16 @@ export const repository = {
 
   saveScore: queueScore,
 
-  loadDashboard: (schoolId) =>
-    readThrough(`dashboard:${schoolId}`, async () => (await gql(GET_RISK_DASHBOARD, { school_id: schoolId })).getRiskDashboard),
+  /** The device copy goes to onCached first (if there is one); the server's answer is returned. */
+  loadDashboard: (schoolId, { onCached } = {}) =>
+    readThrough(`dashboard:${schoolId}`, async () => (await gql(GET_RISK_DASHBOARD, { school_id: schoolId })).getRiskDashboard, onCached),
+
+  /** Every roster of the teacher's classes, fetched side by side (for finding a student). */
+  async loadRosters(schoolId) {
+    await repository.loadClasses(schoolId);
+    const classes = await db().classes.toArray();
+    await Promise.all(classes.map((c) => repository.loadRoster(schoolId, c.class_id)));
+  },
 
   loadSchoolOverview: (schoolId, academicYear = null) =>
     readThrough(`overview:${schoolId}:${academicYear ?? 'current'}`, async () =>

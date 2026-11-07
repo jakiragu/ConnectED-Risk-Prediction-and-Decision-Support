@@ -1,4 +1,4 @@
-import { GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { BatchGetCommand, GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb } from './client.js';
 import { TABLE, pk, sk } from './keys.js';
 
@@ -29,12 +29,35 @@ export const schoolForAccess = (schoolId) => getItem(schoolId, sk.school(), true
 export const term = (schoolId, termId) => getItem(schoolId, sk.term(termId));
 export const klass = (schoolId, classId) => getItem(schoolId, sk.klass(classId), true);
 export const student = (schoolId, studentId) => getItem(schoolId, sk.student(studentId), true);
+/**
+ * Several students by id, in as few round trips as DynamoDB allows (100 keys a
+ * request), as a Map from student_id. Replaces one GetItem per student.
+ */
+export async function studentsByIds(schoolId, ids) {
+  const unique = [...new Set(ids)].filter(Boolean);
+  const out = new Map();
+  for (let i = 0; i < unique.length; i += 100) {
+    let keys = unique.slice(i, i + 100).map((id) => ({ PK: pk(schoolId), SK: sk.student(id) }));
+    for (let attempt = 0; keys.length; attempt += 1) {
+      if (attempt) await new Promise((r) => setTimeout(r, Math.min(50 * 2 ** attempt, 1000)));
+      const res = await ddb.send(new BatchGetCommand({ RequestItems: { [TABLE]: { Keys: keys, ConsistentRead: true } } }));
+      for (const item of res.Responses?.[TABLE] || []) out.set(item.student_id, item);
+      keys = res.UnprocessedKeys?.[TABLE]?.Keys || [];
+    }
+  }
+  return out;
+}
+
 export const admissionClaim = (schoolId, admissionNo) => getItem(schoolId, sk.admissionNo(admissionNo), true);
 export const gradeRule = (schoolId, termId) => getItem(schoolId, sk.gradeRule(termId), true);
 
 export const listTeachers = async (schoolId) =>
   (await queryPrefix(schoolId, sk.teacherPrefix())).sort((a, b) =>
     `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`));
+
+/** teacher_id -> "First Last", for naming who logged or changed a record from its current teacher record. */
+export const teacherNames = async (schoolId) =>
+  new Map((await listTeachers(schoolId)).map((t) => [t.teacher_id, [t.first_name, t.last_name].filter(Boolean).join(' ') || null]));
 
 export const teacherByEmail = async (schoolId, email) =>
   (await queryPrefix(schoolId, sk.teacherPrefix(), {

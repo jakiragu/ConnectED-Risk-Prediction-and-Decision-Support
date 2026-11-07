@@ -5,7 +5,9 @@ import { GET_RISK_IMPORTANCE } from '../api/riskOperations.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { Select } from '../components/Field.jsx';
 import LineChart from '../components/LineChart.jsx';
-import { EmptyState, ImportanceChart, Info, Notice } from '../components/ui.jsx';
+import { EmptyState, Info, Notice } from '../components/ui.jsx';
+import { ChartCard } from '../components/charts.jsx';
+import { Meter, ShareBars, Skeleton, StatTile } from '../components/insights.jsx';
 import { here } from '../navigation.js';
 import { repository } from '../offline/repository.js';
 import { useSync } from '../offline/useSync.js';
@@ -30,10 +32,11 @@ function change(now, before) {
   return { text: `${Math.abs(d)} ${d > 0 ? 'more' : 'fewer'} than at ${LONG[before.point]}`, d };
 }
 
+/** A class's change in flagged students, in the class page's change style (a rise is worse). */
 function Trend({ d }) {
   if (d == null) return <span className="hint">—</span>;
-  if (d === 0) return <span className="hint">no change</span>;
-  return <span className={d > 0 ? 'risk' : 'good'}>{d > 0 ? `↑ ${d}` : `↓ ${-d}`}</span>;
+  if (d === 0) return <span className="change flat">no change</span>;
+  return <span className={`change ${d > 0 ? 'down' : 'up'}`} aria-label={`${d > 0 ? 'up' : 'down'} ${Math.abs(d)}`}>{d > 0 ? `▲ ${d}` : `▼ ${-d}`}</span>;
 }
 
 /**
@@ -83,7 +86,7 @@ export default function SchoolRisk() {
 
   if (!o) {
     return view.savedAt === undefined
-      ? <div className="hint">Loading…</div>
+      ? <Skeleton tiles={4} lines={7} label="Loading the school overview" />
       : <EmptyState title="Not available">The overview could not be loaded, and there is no copy saved on this device yet.</EmptyState>;
   }
   if (!school.now) {
@@ -115,29 +118,31 @@ export default function SchoolRisk() {
       <div className="card headline">
         <b>{school.now.at_risk} of {school.now.students} students ({pct(school.now.rate)})</b> are flagged at {LONG[school.now.point]}
         {moved ? <>, <span className={moved.d > 0 ? 'risk' : moved.d < 0 ? 'good' : ''}>{moved.text}</span>.</> : '.'}
-        {' '}{o.interventions_ongoing} intervention{o.interventions_ongoing === 1 ? ' is' : 's are'} under way.
+        {' '}{o.interventions_ongoing} intervention{o.interventions_ongoing === 1 ? ' is' : 's are'} under way
+        {o.students_with_interventions != null ? ` for ${students(o.students_with_interventions)}` : ''}.
       </div>
 
       <div className="stats">
-        <div className="stat risk"><b>{school.now.at_risk}<small>/{school.now.students}</small></b><span>flagged at {SHORT[school.now.point]}</span></div>
-        <div className="stat"><b><Trend d={moved?.d ?? null} /></b><span>{school.before ? `since ${SHORT[school.before.point]}` : 'change since the last checkpoint'}</span></div>
-        <div className="stat"><b>{above}<small>/{ranked.length}</small></b><span>classes above the school rate</span></div>
-        <div className="stat"><b>{o.interventions_ongoing}</b><span>interventions under way</span></div>
+        <StatTile value={school.now.at_risk} of={school.now.students} label={`flagged at ${SHORT[school.now.point]}`} tone="risk" />
+        <StatTile delta={moved?.d ?? null} label={school.before ? `flagged since ${SHORT[school.before.point]}` : 'change since the last checkpoint'} />
+        <StatTile value={above} of={ranked.length} label="classes above the school rate" />
+        <StatTile value={o.interventions_ongoing} label="interventions under way"
+          sub={o.students_with_interventions != null ? `for ${students(o.students_with_interventions)}` : null} />
       </div>
 
-      <div className="card stack">
-        <div className="row">
-          <h2 className="grow">Share of students flagged, by checkpoint</h2>
-          {o.forms.length > 1 && (
-            <span className="chips" role="group" aria-label="Compare a form">
-              {o.forms.map((f) => (
-                <button key={f.key} type="button" className={`chip toggle${forms.has(f.key) ? ' on' : ''}`} aria-pressed={forms.has(f.key)} onClick={() => toggle(f.key)}>
-                  {f.label}
-                </button>
-              ))}
-            </span>
-          )}
-        </div>
+      <ChartCard
+        title="Share of students flagged, by checkpoint"
+        subtitle="Lower is better. Select a form to compare it with the whole school."
+        actions={o.forms.length > 1 && (
+          <div className="chips" role="group" aria-label="Compare a form">
+            {o.forms.map((f) => (
+              <button key={f.key} type="button" className={`chip toggle${forms.has(f.key) ? ' on' : ''}`} aria-pressed={forms.has(f.key)} onClick={() => toggle(f.key)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
+      >
         <LineChart
           title="Share of students flagged at each checkpoint"
           labels={POINTS.map((p) => SHORT[p])}
@@ -152,10 +157,9 @@ export default function SchoolRisk() {
             })),
           ]}
         />
-        <div className="hint">Lower is better. Select a form to compare it with the whole school.</div>
-      </div>
+      </ChartCard>
 
-      <div className="card stack">
+      <section className="card stack">
         <div className="row">
           <h2 className="grow">Where to look first</h2>
           <Info label="How classes are ordered">Classes are ordered by the share of their students flagged at the latest checkpoint. The change is the number of flagged students since the checkpoint before. The mark on each bar is the school rate.</Info>
@@ -168,14 +172,11 @@ export default function SchoolRisk() {
             <tbody>
               {ranked.map((c) => (
                 <tr key={c.key}>
-                  <td>{c.label}{c.now.rate > school.now.rate && <span className="chip raises above">above school rate</span>}</td>
+                  <td><b className="class-name">{c.label}</b>{c.now.rate > school.now.rate && <span className="pill risk above">Above school rate</span>}</td>
                   <td>{students(c.now.at_risk)} <span className="hint">of {c.now.students}</span></td>
                   <td>
-                    <span className="ratebar">
-                      <span className="track" aria-hidden="true">
-                        <i style={{ width: `${Math.min(c.now.rate * 100 * (100 / yMax), 100)}%` }} />
-                        <span className="tick" style={{ left: `${Math.min(school.now.rate * 100 * (100 / yMax), 100)}%` }} />
-                      </span>
+                    <span className="share-cell">
+                      <Meter value={c.now.rate} max={yMax / 100} mark={(school.now.rate * 100 * 100) / yMax} tone="risk" />
                       <b>{pct(c.now.rate)}</b>
                     </span>
                   </td>
@@ -203,33 +204,31 @@ export default function SchoolRisk() {
             </table>
           </div>
         </details>
-      </div>
+      </section>
 
-      <div className="card stack">
-        <div className="row">
-          <h2 className="grow">What the model weighs most</h2>
-          <Select aria-label="Checkpoint" value={point ?? ''} onChange={setPoint} options={POINTS.map((p) => ({ value: p, label: LONG[p] }))} />
-        </div>
-        {!importance && <div className="hint">Loading…</div>}
-        {importance?.unavailable && <div className="hint">Needs a connection.</div>}
+      <ChartCard
+        title="What the model weighs most"
+        subtitle={importance?.observed?.groups?.length
+          ? `Each factor’s share of what moved estimates across ${students(importance.observed.students)} at ${LONG[point]}. It shows what the model pays attention to, not what causes risk.`
+          : 'Each factor’s share of what moved the estimates. It shows what the model pays attention to, not what causes risk.'}
+        actions={<Select aria-label="Checkpoint" value={point ?? ''} onChange={setPoint} options={POINTS.map((p) => ({ value: p, label: LONG[p] }))} />}
+      >
+        {!importance && <Skeleton bare lines={5} label="Loading the model's factors" />}
+        {importance?.unavailable && <p className="hint">Needs a connection.</p>}
         {importance && !importance.unavailable && (
           importance.observed?.groups?.length ? (
             <>
-              <div className="hint">
-                Each factor&apos;s share of what moved estimates across {students(importance.observed.students)} at {LONG[point]}. It shows
-                what the model pays attention to, not what causes risk.
-              </div>
-              <ImportanceChart items={importance.observed.groups} />
+              <ShareBars items={importance.observed.groups} label="Influence across the school" />
               {importance.model?.groups?.length > 0 && (
                 <details className="more">
                   <summary>Compared with the model&apos;s own evaluation</summary>
-                  <ImportanceChart items={importance.model.groups} />
+                  <ShareBars items={importance.model.groups} label="Influence in the model's evaluation" />
                 </details>
               )}
             </>
-          ) : <div className="hint">No estimates at {LONG[point]} yet.</div>
+          ) : <p className="hint">No estimates at {LONG[point]} yet.</p>
         )}
-      </div>
+      </ChartCard>
     </>
   );
 }

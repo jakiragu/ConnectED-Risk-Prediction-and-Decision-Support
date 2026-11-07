@@ -1139,3 +1139,134 @@ th .sort:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; 
 .target-choice-option:disabled { cursor: default; }
 .target-choice-saved { font-size: .8em; }
 .target-choice-action { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+
+/* ==== Dashboard and Insights fixes =========================================
+   Number tiles, loading placeholders, "Find a student", the interventions
+   panel, icon hover labels and the Insights chart cards. Built only from the
+   tokens above so it matches the class page. */
+
+/* Number tiles: a change is drawn at the same size as every other figure.
+   (It used to sit in a <span> inside <b>, which ".stat span" shrank and greyed.) */
+.stat b.stat-delta { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.stat b.stat-delta .arrow { width: 0.75em; height: 0.75em; fill: currentColor; }
+.stat b.stat-delta.worse { color: var(--risk); }
+.stat b.stat-delta.better { color: var(--good); }
+.stat b.stat-delta.flat { color: var(--ink-strong); }
+.stat .stat-sub { font-size: var(--t-xs); margin-top: -2px; }
+
+/* Loading placeholders, in the shape of what is coming. */
+.skeleton-wrap { display: grid; gap: var(--space-4); }
+.skeleton { display: block; border-radius: var(--radius-sm); background: linear-gradient(90deg, var(--surface-alt) 25%, #d9eff3 50%, var(--surface-alt) 75%); background-size: 200% 100%; animation: skeleton-move 1.4s ease-in-out infinite; }
+.skeleton.line { height: 14px; }
+.skeleton.tile { width: 60%; height: 2.4rem; }
+@keyframes skeleton-move { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* Small buttons in these parts, also when they are links (scoped so other pages are unchanged). */
+.found .btn.small, .intv-panel .btn.small, .ranking .btn.small { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; line-height: 1.2; }
+.found .btn:focus-visible, .intv-panel :is(.btn, .seg, .intv-tab):focus-visible, .chart-card .seg:focus-visible, .toolbar .seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (pointer: coarse) { .found .btn.small, .intv-panel .btn.small { min-height: 44px; } }
+
+/* Search actions share the app's existing row icons; keep them beside the name. */
+.found { gap: 0; margin-top: var(--space-1); border-top: 1px solid var(--line-soft); }
+.found li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--space-2); padding: var(--space-3) 0; border-bottom: 1px solid var(--line-soft); }
+.found li:last-child { border-bottom: 0; }
+.found-who { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.found-who b { color: var(--ink); font-weight: 600; }
+.found-who .hint { font-size: var(--t-sm); }
+.found-actions { display: flex; align-items: center; gap: var(--space-1); }
+.btn.link.student-quick-action { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; color: var(--ink); text-decoration: none; border-radius: var(--radius-sm); }
+.btn.link.student-quick-action:hover { color: var(--ink); background: var(--surface-alt); }
+@media (pointer: coarse) { .btn.link.student-quick-action { width: 44px; height: 44px; } }
+
+/* Dashboard interventions: standard fields, row actions and table colours. */
+.intv-panel { padding: 0; min-width: 0; }
+.intv-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-5); cursor: pointer; border-radius: var(--radius); }
+.intv-toggle:hover { background: var(--surface-alt); }
+.intv-title-btn { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; text-align: left; }
+.intv-toggle-text { min-width: 0; }
+.intv-summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: var(--space-2) 0 0; font-size: var(--t-sm); color: var(--muted); }
+.intv-summary b { color: var(--ink); font-weight: 600; }
+.intv-toggle-hint { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; color: var(--ink); font-size: var(--t-sm); }
+.intv-chevron { display: block; width: 16px; height: 16px; flex: none; transform: rotate(-90deg); }
+.intv-chevron.open { transform: none; }
+.intv-toggle-hint .intv-chevron { transform: none; }
+.intv-toggle-hint .intv-chevron.open { transform: rotate(180deg); }
+.intv-body { padding: 0 var(--space-5) var(--space-5); gap: var(--space-4); }
+.intv-filters { display: flex; align-items: end; gap: var(--space-3); flex-wrap: wrap; padding-top: var(--space-4); border-top: 1px solid var(--line-soft); }
+.intv-filters .field { flex: 0 1 12rem; min-width: 0; }
+.intv-filter-label { font-size: var(--t-sm); color: var(--muted); }
+.intv-listbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.intv-listbar .btn { font-size: var(--t-sm); }
+/* Keep students together; separate the next student only after expanded details. */
+.intv-groups { list-style: none; padding: 0; margin: 0; display: grid; gap: 0; }
+/* Extend student groups to the parent card edges; keep filters and footer inset. */
+.intv-panel .intv-groups { margin-inline: calc(-1 * var(--space-5) - 1px); }
+.intv-group { border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.intv-group.open { border-color: var(--ink); }
+.intv-group.open + .intv-group { margin-top: var(--space-4); }
+.intv-student { display: flex; align-items: center; padding-right: var(--space-3); gap: var(--space-2); }
+.intv-group:nth-child(even) .intv-student { background: var(--surface-alt); }
+.intv-student-toggle { display: grid; grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: var(--space-3); flex: 1; min-width: 0; padding: var(--space-4); border: 0; border-radius: var(--radius-sm); background: none; font: inherit; font-size: var(--t-sm); color: var(--body); cursor: pointer; text-align: left; }
+.intv-student-toggle:hover { background: var(--surface-alt); }
+.intv-student-toggle:focus-visible { outline-offset: -3px; }
+.intv-who { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.intv-who b { font-weight: 600; color: var(--ink); }
+.intv-who .hint { font-size: var(--t-sm); }
+.intv-glance { display: grid; gap: var(--space-1); justify-items: end; min-width: 0; }
+.intv-subjects { display: flex; gap: var(--space-1); flex-wrap: wrap; justify-content: flex-end; }
+.intv-count { color: var(--muted); font-size: var(--t-sm); text-align: right; }
+.intv-profile { flex: none; }
+.intv-detail { border-top: 1px solid var(--line-soft); }
+.intv-cols, .intv-item { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, .7fr) minmax(0, .9fr) minmax(0, 1fr); gap: var(--space-4); padding: var(--space-3) var(--space-4); font-size: var(--t-sm); }
+.intv-cols { background: var(--ink); color: white; font-weight: 600; }
+.intv-items { list-style: none; margin: 0; padding: 0; }
+.intv-item { align-items: baseline; color: var(--body); overflow-wrap: anywhere; }
+.intv-item + .intv-item { border-top: 1px solid var(--line-soft); }
+.intv-item:nth-child(even) { background: var(--surface-alt); }
+.intv-freq, .intv-since, .intv-by { font-size: inherit; }
+.intv-since { font-variant-numeric: tabular-nums; }
+.intv-by.me { font-weight: 600; }
+.intv-k { display: none; }
+.intv-pages { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.intv-pager { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .intv-filters .field { flex: 1 1 9rem; }
+  .intv-student-toggle { grid-template-columns: 16px minmax(0, 1fr); }
+  .intv-glance { grid-column: 2; justify-items: start; }
+  .intv-subjects { justify-content: flex-start; }
+  .intv-count { text-align: left; }
+  .intv-cols { display: none; }
+  .intv-item { grid-template-columns: 1fr 1fr; gap: var(--space-2) var(--space-3); }
+  .intv-method, .intv-by { grid-column: 1 / -1; }
+  .intv-k { display: inline; color: var(--muted); }
+  .intv-summary { gap: var(--space-1) var(--space-3); }
+}
+
+@media (max-width: 480px) {
+  .intv-filters .field { flex-basis: 100%; }
+}
+
+/* Hover and keyboard-focus labels for icon buttons (the icons stay). */
+.has-tip { position: relative; }
+.has-tip::after {
+  content: attr(data-tip); position: absolute; top: 50%; right: calc(100% + 8px); transform: translate(4px, -50%);
+  padding: 4px 8px; border-radius: var(--radius-sm); background: var(--ink-strong); color: #fff;
+  font-size: var(--t-xs); font-weight: 600; line-height: 1.3; white-space: nowrap; text-decoration: none;
+  pointer-events: none; opacity: 0; transition: opacity 0.12s ease, transform 0.12s ease; z-index: 6;
+}
+.has-tip:hover::after, .has-tip:focus-visible::after { opacity: 1; transform: translate(0, -50%); transition-delay: 0.15s; }
+@media (prefers-reduced-motion: reduce) { .has-tip::after { transition: none; } }
+
+/* Insights: chart cards with their own controls, and share bars. */
+.chart-card header.with-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.chart-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.chart-actions select { width: auto; min-width: 11rem; }
+.insight-section { display: grid; gap: var(--space-3); }
+.insight-section h2 { margin: 0; }
+.share-bars li { grid-template-columns: minmax(6rem, 9rem) 1fr 3rem; }
+.share-cell { display: inline-grid; grid-template-columns: 8rem 3.5rem; align-items: center; gap: var(--space-3); }
+.share-cell b { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-strong); }
+.ranking .class-name { color: var(--ink-strong); font-weight: 600; }
+.ranking .pill.above { margin-left: var(--space-2); white-space: nowrap; }
+.ranking { min-width: 48rem; }

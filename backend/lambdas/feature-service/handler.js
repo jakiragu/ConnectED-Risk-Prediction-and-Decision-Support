@@ -5,6 +5,7 @@ import { FEATURE_CONTRACT, POINT_NAMES, MODEL_SUBJECTS, SUBJECT_TO_MODEL } from 
 import { validation, notFound } from '../../library/errors.js';
 import * as features from '../../library/featureStore.js';
 import * as platform from '../../library/platformRepo.js';
+import { mapLimit } from '../../library/concurrency.js';
 
 /**
  * The risk model's inputs, as the gradebook would hand them to the model.
@@ -66,17 +67,17 @@ async function getFeatureReadiness(actor, { school_id, class_id, prediction_poin
   const terms = await features.termsOfYear(school_id, year);
   const roster = await platform.roster(school_id, class_id);
 
-  const students = [];
-  for (const s of roster) {
+  // Each student's features are several reads; eight students at a time instead of one.
+  const students = await mapLimit(roster, 8, async (s) => {
     const row = await features.buildForStudent(school_id, s.student_id, point, year, terms);
-    students.push({
+    return {
       student_id: s.student_id,
       admission_no: s.admission_no,
       first_name: s.first_name,
       last_name: s.last_name,
       ...counts(row),
-    });
-  }
+    };
+  });
   return {
     class_id,
     class_name: klass.name,

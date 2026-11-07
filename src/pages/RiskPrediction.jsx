@@ -9,7 +9,9 @@ import {
 import { useAuth } from '../auth/AuthContext.jsx';
 import { Select } from '../components/Field.jsx';
 import RiskExplanation from '../components/RiskExplanation.jsx';
-import { EmptyState, ImportanceChart, Info, Notice, Offline, RiskBar, useToast, ActionIcon } from '../components/ui.jsx';
+import { EmptyState, Info, Notice, Offline, RiskBar, useToast, ActionIcon } from '../components/ui.jsx';
+import { ChartCard } from '../components/charts.jsx';
+import { ShareBars, Skeleton, StatTile } from '../components/insights.jsx';
 import { db } from '../offline/db.js';
 import { repository } from '../offline/repository.js';
 import { useLive } from '../offline/useLive.js';
@@ -31,11 +33,15 @@ const targetLine = (c) => (c.kind === 'attendance'
   ? `Attendance ${c.from.toFixed(1)}% → ${c.to.toFixed(1)}%`
   : `${c.group} ${Math.round(c.from)} → ${Math.round(c.to)}`);
 
+/** The class's latest prediction run, as a status pill. */
 function runText(run) {
-  if (!run) return { text: 'Not made yet', tone: 'muted' };
-  if (run.status === 'COMPLETE') return { text: `Made ${new Date(run.finished_at || run.started_at).toLocaleDateString()}`, tone: '' };
-  if (run.status === 'FAILED') return { text: 'Last run failed', tone: 'warn' };
-  return { text: 'Running…', tone: '' };
+  if (!run) return { text: 'Predictions not made yet', tone: 'neutral' };
+  if (run.status === 'COMPLETE') {
+    const on = new Date(run.finished_at || run.started_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    return { text: `Predictions made ${on}`, tone: 'good' };
+  }
+  if (run.status === 'FAILED') return { text: 'Last run failed', tone: 'risk' };
+  return { text: 'Predictions running…', tone: 'neutral' };
 }
 
 /** The model's inputs at a point, as a table: subjects and attendance down, checkpoints across. */
@@ -134,12 +140,18 @@ export default function RiskPrediction() {
     if (requestId !== loadRequest.current) return;
     setYear(per[0]?.year ?? null);
     setRows(per.flatMap((x) => x.rows).sort((a, b) => (b.p?.probability ?? -1) - (a.p?.probability ?? -1)));
+  }, [actor.schoolId, shown, point]);
+
+  // The importance chart is fetched alongside the table, not after it, and never holds the table up.
+  const importanceRequest = useRef(0);
+  const loadImportance = useCallback(async () => {
+    const requestId = ++importanceRequest.current;
+    if (!shown.length) return;
     const { getRiskImportance } = await gql(GET_RISK_IMPORTANCE, {
       school_id: actor.schoolId, prediction_point: point.value, ...(all ? {} : { class_id: classParam }),
     }).catch(() => ({ getRiskImportance: null }));
-    if (requestId !== loadRequest.current) return;
-    setImportance(getRiskImportance);
-  }, [actor.schoolId, shown, point, all, classParam]);
+    if (requestId === importanceRequest.current) setImportance(getRiskImportance);
+  }, [actor.schoolId, shown.length, point, all, classParam]);
 
   const loadRun = useCallback(async () => {
     if (all || !classParam || !term) { setRun(null); return null; }
@@ -149,9 +161,13 @@ export default function RiskPrediction() {
   }, [actor.schoolId, all, classParam, term, point]);
 
   useEffect(() => {
-    setRows(null); setDetail(null); setError(null); setImportance(null);
+    setRows(null); setDetail(null); setError(null);
     if (online) load().catch((e) => setError(e.message));
   }, [load, online]);
+  useEffect(() => {
+    setImportance(null);
+    if (online) loadImportance();
+  }, [loadImportance, online]);
   useEffect(() => { if (online) loadRun().catch(() => {}); }, [loadRun, online]);
 
   // While a run is queued or running, check every two seconds, then reload.
@@ -159,10 +175,10 @@ export default function RiskPrediction() {
     if (!run || !['QUEUED', 'RUNNING'].includes(run.status)) return undefined;
     const t = setTimeout(async () => {
       const r = await loadRun().catch(() => null);
-      if (r && !['QUEUED', 'RUNNING'].includes(r.status)) { load().catch(() => {}); showToast('Predictions updated'); }
+      if (r && !['QUEUED', 'RUNNING'].includes(r.status)) { load().catch(() => {}); loadImportance(); showToast('Predictions updated'); }
     }, 2000);
     return () => clearTimeout(t);
-  }, [run, loadRun, load, showToast]);
+  }, [run, loadRun, load, loadImportance, showToast]);
 
   useEffect(() => {
     if (!detail) return;
@@ -218,6 +234,7 @@ export default function RiskPrediction() {
         <Select aria-label="Checkpoint" value={point.value} onChange={(v) => go({ point: v })}
           options={POINTS.map((p) => ({ value: p.value, label: p.label }))} />
         <span className="grow" />
+        {!all && rows && <span className={`pill ${status.tone}`}>{status.text}</span>}
         {isAdmin && !all && term && (
           <button type="button" className="btn secondary" disabled={busy} onClick={rerun}>{busy ? 'Running…' : 'Run predictions again'}</button>
         )}
@@ -226,12 +243,13 @@ export default function RiskPrediction() {
       {error && <Notice tone="error">{error}</Notice>}
       {run?.status === 'FAILED' && <Notice tone="warn">The last prediction run failed: {run.error}</Notice>}
 
+      {!rows && !error && <Skeleton tiles={3} lines={8} label="Loading predictions" />}
+
       {rows && (
         <div className="stats">
-          <div className="stat"><b>{rows.length}</b><span>students</span></div>
-          <div className="stat risk"><b>{flagged}<small>/{predicted.length}</small></b><span>flagged at risk</span></div>
-          <div className="stat"><b>{missing}</b><span>with missing results</span></div>
-          {!all && <div className="stat"><b className={status.tone === 'warn' ? 'warn' : ''} style={{ fontSize: 'var(--t-lg)' }}>{status.text}</b><span>predictions</span></div>}
+          <StatTile value={rows.length} label="students" />
+          <StatTile value={flagged} of={predicted.length} label={`flagged at ${SHORT[point.value]}`} tone="risk" />
+          <StatTile value={missing} label="with missing results" />
         </div>
       )}
 
@@ -282,7 +300,7 @@ export default function RiskPrediction() {
                     </td>
                     <td className="actions">
                       {p && (
-                        <button type="button" className="btn link" aria-label={`View prediction details for ${r.first_name} ${r.last_name}`} title="Details"
+                        <button type="button" className="btn link has-tip" data-tip="Explain" aria-label={`Explain the estimate for ${r.first_name} ${r.last_name}`}
                           onClick={() => openDetail(r)}
                         >
                           <ActionIcon name="eye" />
@@ -290,7 +308,7 @@ export default function RiskPrediction() {
                       )}
 
                       <Link to={`/students/${r.student_id}/risk`} state={{ from: `${location.pathname}${location.search}` }}
-                        className="btn link" aria-label={`View risk profile for ${r.first_name} ${r.last_name}`} title="Profile"
+                        className="btn link has-tip" data-tip="Risk profile" aria-label={`Open the risk profile of ${r.first_name} ${r.last_name}`}
                       >
                         <ActionIcon name="users" />
                       </Link>
@@ -320,27 +338,26 @@ export default function RiskPrediction() {
       )}
 
       {importance && (importance.observed?.groups?.length > 0 || importance.model?.groups?.length > 0) && (
-        <div className="card stack">
+        <section className="insight-section" aria-labelledby="drivers-title">
           <div className="row">
-            <h2 className="grow">What drives the estimates at {SHORT[point.value]}</h2>
-            <Info label="About this chart">
+            <h2 id="drivers-title" className="grow">What drives the estimates at {SHORT[point.value]}</h2>
+            <Info label="About these charts">
               The average size of each factor&apos;s influence (mean absolute SHAP), in either direction. It shows what the model
               pays attention to, not what causes risk.
             </Info>
           </div>
-          <div className="two-col">
-            <div className="stack">
-              <h3 className="sub">{all ? 'Across the school' : `In ${shown[0]?.name}`}</h3>
-              <ImportanceChart items={importance.observed?.groups} />
-            </div>
+          <div className="graph-grid">
+            <ChartCard title={all ? 'Across the school' : `In ${shown[0]?.name}`}
+              subtitle={`Share of what moved the estimates${importance.observed?.students ? ` of ${importance.observed.students} students` : ''}`}>
+              <ShareBars items={importance.observed?.groups} label="Influence in this group" />
+            </ChartCard>
             {importance.model?.groups?.length > 0 && (
-              <div className="stack">
-                <h3 className="sub">In the model&apos;s evaluation</h3>
-                <ImportanceChart items={importance.model.groups} />
-              </div>
+              <ChartCard title="In the model’s evaluation" subtitle="The same measure on the students the model was tested on">
+                <ShareBars items={importance.model.groups} label="Influence in the model's evaluation" />
+              </ChartCard>
             )}
           </div>
-        </div>
+        </section>
       )}
 
       {isAdmin && model && (
