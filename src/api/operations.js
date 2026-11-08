@@ -310,10 +310,10 @@ const PROMOTION_SUMMARY = `promote repeat graduate leave classes_created classes
 const PROMOTION_REF = `key class_id name grade stream year level exists`;
 const PROMOTION_RUN = `
   run_id from_year to_year status copy_teachers teacher_strategy
-  decisions { student_id name automatic_action action average pass_mark overridden override_reason overridden_by from_class_id to_class_id }
+  decisions { student_id name automatic_action action average pass_mark overridden override_reason overridden_by overridden_by_name from_class_id to_class_id }
   summary { ${PROMOTION_SUMMARY} }
   skipped { student_id name reason } skipped_teachers interventions_stopped
-  created_by_name created_at applied_at reverted_at can_revert revert_blocked_reason`;
+  created_by_name created_at applied_at reverted_at reverted_by reverted_by_name can_revert revert_blocked_reason`;
 
 export const PLAN_PROMOTION = `
   query PlanPromotion($school_id: ID!, $from_year: Int!, $overrides: [PromotionOverrideInput!], $teacher_strategy: String, $excluded_teachers: [ID!]) {

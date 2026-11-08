@@ -33,10 +33,10 @@ export const SUBMIT_ATTENDANCE = `
   }`;
 
 export const GET_FEATURE_READINESS = `
-  query GetFeatureReadiness($school_id: ID!, $class_id: ID!, $prediction_point: String!, $academic_year: Int) {
+  query GetFeatureReadiness($school_id: ID!, $class_id: ID, $prediction_point: String!, $academic_year: Int) {
     getFeatureReadiness(school_id: $school_id, class_id: $class_id, prediction_point: $prediction_point, academic_year: $academic_year) {
       class_id class_name academic_year prediction_point columns complete
-      students { student_id admission_no first_name last_name missing_scores missing_attendance notes complete }
+      students { student_id class_id admission_no first_name last_name missing_scores missing_attendance notes complete }
     }
   }`;
 

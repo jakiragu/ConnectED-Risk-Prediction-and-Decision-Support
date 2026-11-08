@@ -272,9 +272,19 @@ export function ImportanceChart({ items, limit = 9 }) {
 export function Sparkline({ points, width = 120, height = 32 }) {
   if (!points?.length) return null;
   const pad = 4;
-  const x = (i) => (points.length < 2 ? width / 2 : pad + (i * (width - 2 * pad)) / (points.length - 1));
-  const y = (v) => pad + (1 - v) * (height - 2 * pad);
   const last = points[points.length - 1];
+  // Scaled to this student's estimates and the threshold, not 0-100%, so a rise of a few points is
+  // visible at this size; a span of at least 20 points keeps small wobbles looking small.
+  const values = [...points.map((p) => p.probability), last.threshold];
+  let lo = Math.max(0, Math.min(...values) - 0.05);
+  let hi = Math.min(1, Math.max(...values) + 0.05);
+  if (hi - lo < 0.2) {
+    const mid = (hi + lo) / 2;
+    lo = Math.max(0, Math.min(mid - 0.1, 0.8));
+    hi = lo + 0.2;
+  }
+  const x = (i) => (points.length < 2 ? width / 2 : pad + (i * (width - 2 * pad)) / (points.length - 1));
+  const y = (v) => pad + ((hi - v) / (hi - lo)) * (height - 2 * pad);
   const words = points.map((p) => `${p.prediction_point} ${Math.round(p.probability * 100)}%`).join(', ');
   return (
     <svg className="sparkline" width={width} height={height} role="img" aria-label={`Estimated risk through the year: ${words}`}>

@@ -718,6 +718,8 @@ td.pick { cursor: default; }
 .sparkline .spark-threshold { stroke: var(--risk); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
 .sparkline .spark-dot { fill: var(--ink); }
 .sparkline .spark-dot.risk { fill: var(--risk); }
+.trend-cell { display: flex; align-items: center; gap: var(--space-3); white-space: nowrap; }
+.trend-cell .hint { font-size: var(--t-xs); font-variant-numeric: tabular-nums; }
 
 /* ---- school risk ---- */
 .headline { font-size: var(--t-lg); line-height: 1.5; color: var(--body); }
@@ -1195,6 +1197,14 @@ th .sort:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; 
 .intv-body { padding: 0 var(--space-5) var(--space-5); gap: var(--space-4); }
 .intv-filters { display: flex; align-items: end; gap: var(--space-3); flex-wrap: wrap; padding-top: var(--space-4); border-top: 1px solid var(--line-soft); }
 .intv-filters .field { flex: 0 1 12rem; min-width: 0; }
+/* Open, the header turns into a dark band like a table heading, so the open panel reads as one block.
+   Delete this block to go back to the light header. */
+.intv-panel.is-open .intv-toggle { background: var(--ink); color: #fff; border-radius: var(--radius) var(--radius) 0 0; }
+.intv-panel.is-open .intv-toggle:hover { background: var(--ink-strong); }
+.intv-panel.is-open .intv-toggle h2, .intv-panel.is-open .intv-toggle-hint, .intv-panel.is-open .intv-summary b { color: #fff; }
+.intv-panel.is-open .intv-summary { color: rgba(255, 255, 255, 0.82); }
+.intv-panel.is-open .intv-title-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.intv-panel.is-open .intv-filters { border-top: 0; }
 .intv-filter-label { font-size: var(--t-sm); color: var(--muted); }
 .intv-listbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .intv-listbar .btn { font-size: var(--t-sm); }

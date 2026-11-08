@@ -21,6 +21,22 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString() : '');
  * administrators see every subject and attendance. Flags are decision-support
  * signals from the risk model, not judgements about students.
  */
+/** The Trend column: this year's estimates as a sparkline, and how the latest moved from the one before. */
+function TrendCell({ points }) {
+  if (!points?.length) return <span className="hint">—</span>;
+  const last = points[points.length - 1];
+  const prev = points[points.length - 2];
+  const change = prev ? Math.round((last.probability - prev.probability) * 100) : null;
+  return (
+    <div className="trend-cell">
+      <Sparkline points={points} width={96} height={28} />
+      <span className="hint" title={prev ? `Since ${prev.label}` : undefined}>
+        {change == null ? 'First estimate' : change === 0 ? 'No change' : `${change > 0 ? '↑' : '↓'} ${Math.abs(change)} pts`}
+      </span>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { actor, isAdmin, displayName } = useAuth();
   const { online } = useSync();
@@ -249,7 +265,7 @@ export default function Dashboard() {
                               <b className="risk">{pct(c.latest.probability)}</b>
                             </td>
                             <td>{c.latest.label}</td>
-                            <td><Sparkline points={c.trend} /></td>
+                            <td><TrendCell points={c.trend} /></td>
                           </tr>
 
                           {isOpen && (

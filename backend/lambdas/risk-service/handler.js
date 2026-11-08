@@ -121,13 +121,22 @@ const predictionView = (p, student) => ({
   best_target: bestTarget(p.counterfactuals, p.target_choice),
 });
 
+/**
+ * One class's predictions, or (administrators, no class_id) every class's in one
+ * read: the Risk prediction page's "All classes" view used to ask once per class,
+ * and each of those requests read the whole school's predictions.
+ */
 async function listRiskPredictions(actor, { school_id, class_id, prediction_point, academic_year }) {
-  if (!(await platform.klass(school_id, class_id))) throw notFound('Class not found');
-  assertClassTeacherOrAdmin(actor, class_id);
+  if (class_id) {
+    if (!(await platform.klass(school_id, class_id))) throw notFound('Class not found');
+    assertClassTeacherOrAdmin(actor, class_id);
+  } else {
+    assertAdmin(actor);
+  }
   const point = requirePoint(prediction_point);
   const year = await yearFor(school_id, point, academic_year);
   if (!year) return [];
-  const items = await risk.listForClass(school_id, year, point, class_id);
+  const items = class_id ? await risk.listForClass(school_id, year, point, class_id) : await risk.listForPoint(school_id, year, point);
   const students = await platform.studentsByIds(school_id, items.map((p) => p.student_id));
   return items
     .map((p) => predictionView(p, students.get(p.student_id)))
@@ -204,8 +213,8 @@ async function getRiskImportance(actor, { school_id, prediction_point, academic_
 
   const predictions = year
     ? class_id
-      ? await risk.listForClass(school_id, year, point, class_id)
-      : await risk.listForPoint(school_id, year, point)
+      ? await risk.listForClass(school_id, year, point, class_id, risk.FIELDS.importance)
+      : await risk.listForPoint(school_id, year, point, risk.FIELDS.importance)
     : [];
   const observed = importanceOver(predictions);
   return {

@@ -86,6 +86,28 @@ export const listStudents = async (schoolId, classId, { includeInactive = false 
 export const roster = (schoolId, classId) => listStudents(schoolId, classId);
 
 /**
+ * Every active student in the school, in one read. Students are not indexed by
+ * class, so listStudents reads the whole school's students and filters them;
+ * a page covering many classes reads them once with this instead of once per class.
+ */
+export const listActiveStudents = async (schoolId) =>
+  (await queryPrefix(schoolId, sk.studentPrefix(), {
+    FilterExpression: 'attribute_not_exists(#st) OR #st = :active',
+    ExpressionAttributeNames: { '#st': 'status' },
+    ExpressionAttributeValues: { ':active': 'ACTIVE' },
+  })).sort(byAdmission);
+
+/** Active students grouped by class: class_id -> roster, ordered as listStudents orders them. */
+export async function activeStudentsByClass(schoolId) {
+  const out = new Map();
+  for (const s of await listActiveStudents(schoolId)) {
+    if (!out.has(s.class_id)) out.set(s.class_id, []);
+    out.get(s.class_id).push(s);
+  }
+  return out;
+}
+
+/**
  * Sets a term's checkpoint weights and whether it holds an Opener. Both share
  * checkpoint_weights_version, so an End of term calculation notices either
  * changing (resultsRepo.publish checks that version).

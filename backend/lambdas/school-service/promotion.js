@@ -146,16 +146,29 @@ function planView(plan, run) {
   };
 }
 
+// Who overrode or undid something is stored by id and, since this fix, by name as it was at the
+// time. Older records have only the id: their name is looked up from the current staff list.
+async function withActorNames(schoolId, run, decisions) {
+  const missing = (run.reverted_by && !run.reverted_by_name) || decisions.some((d) => d.overridden_by && !d.overridden_by_name);
+  const names = missing ? await platform.teacherNames(schoolId) : new Map();
+  const nameOf = (id, saved) => saved ?? (id ? names.get(id) ?? null : null);
+  return {
+    decisions: decisions.map((d) => ({ ...d, overridden_by_name: nameOf(d.overridden_by, d.overridden_by_name) })),
+    reverted_by_name: nameOf(run.reverted_by, run.reverted_by_name),
+  };
+}
+
 async function runView(schoolId, run) {
   if (!run) return null;
   const reason = run.status === repo.RUN_STATUS.APPLIED ? await revertBlockedReason(schoolId, run) : null;
+  const named = await withActorNames(schoolId, run, await repo.listMoves(schoolId, run.run_id));
   return {
     run_id: run.run_id,
     from_year: run.from_year,
     to_year: run.to_year,
     status: run.status,
     teacher_strategy: run.teacher_strategy ?? (run.copy_teachers ? 'FOLLOW' : 'MANUAL'),
-    decisions: await repo.listMoves(schoolId, run.run_id),
+    decisions: named.decisions,
     copy_teachers: Boolean(run.copy_teachers),
     summary: run.summary,
     skipped: run.skipped || [],
@@ -165,6 +178,8 @@ async function runView(schoolId, run) {
     created_at: run.created_at ?? null,
     applied_at: run.applied_at ?? null,
     reverted_at: run.reverted_at ?? null,
+    reverted_by: run.reverted_by ?? null,
+    reverted_by_name: named.reverted_by_name,
     can_revert: run.status === repo.RUN_STATUS.APPLIED && !reason,
     revert_blocked_reason: reason,
   };
@@ -271,7 +286,7 @@ export async function applyPromotion(actor, input) {
     .map((c) => [c.after.class_teacher_of, c.teacher_id]));
 
   const sourceOf = new Map([...mainDestination].map(([s, d]) => [d, s]));
-  const moves = plan.moves.map((m) => ({ ...m, overridden_by: m.overridden ? actor.sub : null, to_class_id: m.to_key ? classIdOf(m.to_key) : null, from_year: fromYear }));
+  const moves = plan.moves.map((m) => ({ ...m, overridden_by: m.overridden ? actor.sub : null, overridden_by_name: m.overridden ? actor.name ?? null : null, to_class_id: m.to_key ? classIdOf(m.to_key) : null, from_year: fromYear }));
   const run = {
     run_id: runId,
     from_year: fromYear,
@@ -468,6 +483,7 @@ export async function revertPromotion(actor, { school_id, run_id }) {
     status: repo.RUN_STATUS.REVERTED,
     reverted_at: new Date().toISOString(),
     reverted_by: actor.sub,
+    reverted_by_name: actor.name ?? null,
     revert_skipped: skipped,
     classes_kept: kept,
   });

@@ -166,15 +166,17 @@ export async function getStudentRiskProfile(actor, { school_id, student_id, acad
 
 // ---------------------------------------------------------------- dashboard
 
-/** Each student's latest prediction this year, from one query per prediction point. */
-async function latestByStudent(schoolId, year) {
+/** Each student's predictions this year in checkpoint order (the last is the latest), from one query per prediction point. */
+async function predictionsByStudent(schoolId, year) {
   const out = new Map();
   if (!year) return out;
-  const lists = await Promise.all(POINT_NAMES.map((point) => risk.listForPoint(schoolId, year, point)));
+  // Only what a card shows: the model inputs and SHAP values make the full records many times larger.
+  const lists = await Promise.all(POINT_NAMES.map((point) => risk.listForPoint(schoolId, year, point, risk.FIELDS.dashboard)));
   for (const p of lists.flat()) {
-    const prev = out.get(p.student_id);
-    if (!prev || pointIndex(p.prediction_point) > pointIndex(prev.prediction_point)) out.set(p.student_id, p);
+    if (!out.has(p.student_id)) out.set(p.student_id, []);
+    out.get(p.student_id).push(p);
   }
+  for (const series of out.values()) series.sort((a, b) => pointIndex(a.prediction_point) - pointIndex(b.prediction_point));
   return out;
 }
 
@@ -190,16 +192,19 @@ export async function getRiskDashboard(actor, { school_id }) {
   const inYear = (c) => (year == null || c.year == null ? c.status !== 'PAST' : Number(c.year) === Number(year));
   const classes = allClasses.filter((c) => (ids ? ids.has(c.class_id) : c.status !== 'PAST') && inYear(c));
   const currentTerm = terms.find((t) => Number(t.academic_year) === Number(year) && termStatus(t, today) === 'CURRENT') ?? null;
-  const [latest, names] = await Promise.all([latestByStudent(school_id, year), platform.teacherNames(school_id)]);
+  // The school's active students are read once and grouped by class, rather than read again for every class.
+  const [predictions, names, rosters] = await Promise.all([
+    predictionsByStudent(school_id, year), platform.teacherNames(school_id), platform.activeStudentsByClass(school_id),
+  ]);
 
   // Classes are read side by side rather than one after another: each needs its
-  // roster, interventions and papers, and waiting for every class in turn was
+  // interventions and papers, and waiting for every class in turn was
   // most of the dashboard's load time.
   const perClass = await Promise.all(classes.map(async (klass) => {
     const scope = scopeFor(actor, klass.class_id);
     const subjects = currentTerm ? (isAdmin(actor) ? new Set(SUBJECTS) : new Set(subjectsITeach(actor, klass.class_id))) : new Set();
-    const [roster, logged, papers] = await Promise.all([
-      platform.listStudents(school_id, klass.class_id),
+    const roster = rosters.get(klass.class_id) || [];
+    const [logged, papers] = await Promise.all([
       scope ? interventions.listForClass(school_id, klass.class_id) : [],
       subjects.size ? assessments.listAllLive(school_id, klass.class_id, currentTerm.term_id) : [],
     ]);
@@ -223,12 +228,15 @@ export async function getRiskDashboard(actor, { school_id }) {
         });
       }
       for (const s of roster) {
-        const p = latest.get(s.student_id);
+        const series = predictions.get(s.student_id) || [];
+        const p = series[series.length - 1];
         if (!p?.at_risk) continue;
         out.flagged += 1;
         out.atRisk.push({
           student: studentView(s, klass),
           latest: summary(p),
+          // Every estimate this year, for the Trend column's sparkline.
+          trend: series.map(summary),
           targets: bestChanges(p, scope),
           partial: !scope.all,
           // What the viewer may log an intervention for, so several students can be chosen at once.
@@ -273,7 +281,8 @@ export async function getSchoolRiskOverview(actor, { school_id, academic_year })
   assertAdmin(actor);
   const [classes, terms] = await Promise.all([platform.listClasses(school_id), platform.listTerms(school_id)]);
   const year = academic_year ?? currentYear(terms);
-  const byPoint = year ? await Promise.all(POINT_NAMES.map((point) => risk.listForPoint(school_id, year, point))) : POINT_NAMES.map(() => []);
+  // Counting needs only class and flag, not the full prediction records.
+  const byPoint = year ? await Promise.all(POINT_NAMES.map((point) => risk.listForPoint(school_id, year, point, risk.FIELDS.overview))) : POINT_NAMES.map(() => []);
   const classById = new Map(classes.map((c) => [c.class_id, c]));
 
   const points = POINT_NAMES.map((point, i) => {

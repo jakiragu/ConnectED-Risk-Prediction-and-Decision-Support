@@ -75,6 +75,8 @@ function DataUsed({ features }) {
   );
 }
 
+const PAGE_SIZE = 10; // students per page in the table
+
 /**
  * Risk prediction: the model's estimate for each student at a checkpoint, what
  * moved it, and the target for the next checkpoint. Estimates are made when a
@@ -111,6 +113,7 @@ export default function RiskPrediction() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
   const [toast, showToast] = useToast();
+  const [page, setPage] = useState(1); // 10 students a page, as on the dashboard
 
   useEffect(() => { repository.loadClasses(actor.schoolId).catch(() => {}); }, [actor.schoolId]);
   useEffect(() => {
@@ -126,21 +129,30 @@ export default function RiskPrediction() {
   );
 
   // Every class shown: who is in it, what the model had, and what it estimated.
+  // "All classes" asks once for the whole school (administrators) instead of once per
+  // class, which overloaded the server; a single class is asked for as before.
   const load = useCallback(async () => {
     const requestId = ++loadRequest.current;
     if (!shown.length) return;
-    const per = await Promise.all(shown.map(async (c) => {
-      const scope = { school_id: actor.schoolId, class_id: c.class_id, prediction_point: point.value };
+    const shownById = new Map(shown.map((c) => [c.class_id, c]));
+    const scopes = all ? [{}] : shown.map((c) => ({ class_id: c.class_id }));
+    const per = await Promise.all(scopes.map(async (only) => {
+      const scope = { school_id: actor.schoolId, prediction_point: point.value, ...only };
       const [{ getFeatureReadiness: r }, { listRiskPredictions: p }] = await Promise.all([
         gql(GET_FEATURE_READINESS, scope), gql(LIST_RISK_PREDICTIONS, scope),
       ]);
-      const byStudent = new Map(p.map((x) => [x.student_id, x]));
-      return { year: r.academic_year, rows: r.students.map((s) => ({ ...s, class_name: c.name, class_id: c.class_id, p: byStudent.get(s.student_id) })) };
+      // A prediction belongs to the row of the class it was made in, as when each class was asked for separately.
+      const byStudent = new Map(p.map((x) => [`${x.student_id}|${x.class_id}`, x]));
+      const rows = r.students
+        .map((s) => ({ ...s, class_id: s.class_id ?? only.class_id }))
+        .filter((s) => shownById.has(s.class_id))
+        .map((s) => ({ ...s, class_name: shownById.get(s.class_id).name, p: byStudent.get(`${s.student_id}|${s.class_id}`) }));
+      return { year: r.academic_year, rows };
     }));
     if (requestId !== loadRequest.current) return;
     setYear(per[0]?.year ?? null);
     setRows(per.flatMap((x) => x.rows).sort((a, b) => (b.p?.probability ?? -1) - (a.p?.probability ?? -1)));
-  }, [actor.schoolId, shown, point]);
+  }, [actor.schoolId, shown, all, point]);
 
   // The importance chart is fetched alongside the table, not after it, and never holds the table up.
   const importanceRequest = useRef(0);
@@ -161,7 +173,7 @@ export default function RiskPrediction() {
   }, [actor.schoolId, all, classParam, term, point]);
 
   useEffect(() => {
-    setRows(null); setDetail(null); setError(null);
+    setRows(null); setDetail(null); setError(null); setPage(1);
     if (online) load().catch((e) => setError(e.message));
   }, [load, online]);
   useEffect(() => {
@@ -215,6 +227,9 @@ export default function RiskPrediction() {
   const flagged = predicted.filter((r) => r.p.at_risk).length;
   const missing = (rows || []).filter((r) => r.missing_scores + r.missing_attendance > 0).length;
   const status = runText(run);
+  const pageCount = Math.max(1, Math.ceil((rows?.length || 0) / PAGE_SIZE));
+  const current = Math.min(page, pageCount);
+  const pageRows = (rows || []).slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
   const busy = run && ['QUEUED', 'RUNNING'].includes(run.status);
 
   return (
@@ -268,7 +283,7 @@ export default function RiskPrediction() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {pageRows.map((r) => {
                 const p = r.p;
                 const first = p?.best_target?.[0];
                 return (
@@ -318,6 +333,18 @@ export default function RiskPrediction() {
               })}
             </tbody>
           </table>
+          {pageCount > 1 && (
+            <div className="row wrap between risk-pagination">
+              <span className="hint">
+                Showing {(current - 1) * PAGE_SIZE + 1}–{Math.min(current * PAGE_SIZE, rows.length)} of {rows.length} students
+              </span>
+              <div className="row">
+                <button type="button" className="btn secondary" disabled={current === 1} onClick={() => setPage(current - 1)}>Previous</button>
+                <span className="hint">Page {current} of {pageCount}</span>
+                <button type="button" className="btn secondary" disabled={current === pageCount} onClick={() => setPage(current + 1)}>Next</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

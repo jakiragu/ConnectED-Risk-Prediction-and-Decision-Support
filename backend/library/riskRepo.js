@@ -105,22 +105,52 @@ export async function getPrediction(schoolId, academicYear, point, studentId) {
   return Item || null;
 }
 
-/** Every prediction at one point in a school year (all classes). */
-export const listForPoint = (schoolId, academicYear, point) =>
+/**
+ * A prediction holds its model inputs, SHAP values and targets, so a whole
+ * school's predictions are large. Callers that need only a few fields name them
+ * and DynamoDB returns just those (#f0, #f1... avoid clashes with reserved words).
+ */
+const only = (fields) => (fields?.length
+  ? {
+      ProjectionExpression: fields.map((_, i) => `#f${i}`).join(', '),
+      ExpressionAttributeNames: Object.fromEntries(fields.map((f, i) => [`#f${i}`, f])),
+    }
+  : {});
+
+/** The fields each slim read needs. */
+export const FIELDS = {
+  // What a dashboard card shows: the summary and the chosen target (predictionTargets / targetToken).
+  dashboard: ['school_id', 'student_id', 'class_id', 'academic_year', 'prediction_point', 'run_id', 'predicted_at',
+    'model_version', 'probability', 'at_risk', 'threshold', 'counterfactuals', 'target_choice'],
+  // Counting students and flags per class and form.
+  overview: ['student_id', 'class_id', 'at_risk'],
+  // Observed importance (mean |SHAP| per group).
+  importance: ['class_id', 'shap_values'],
+  // The missing-data counts the model received.
+  readiness: ['student_id', 'class_id', 'missing_scores', 'missing_attendance'],
+};
+
+/** Every prediction at one point in a school year (all classes). `fields` limits what is read. */
+export const listForPoint = (schoolId, academicYear, point, fields) =>
   queryAll({
     TableName: TABLE,
     KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
     ExpressionAttributeValues: { ':p': pk(schoolId), ':s': sk.riskPointPrefix(academicYear, point) },
+    ...only(fields),
   });
 
-/** Predictions at one point for the students who were in a class when it ran. */
-export const listForClass = (schoolId, academicYear, point, classId) =>
-  queryAll({
+/** Predictions at one point for the students who were in a class when it ran. `fields` limits what is read. */
+export function listForClass(schoolId, academicYear, point, classId, fields) {
+  const projection = only(fields);
+  return queryAll({
     TableName: TABLE,
     KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
-    FilterExpression: 'class_id = :c',
+    FilterExpression: '#class = :c',
     ExpressionAttributeValues: { ':p': pk(schoolId), ':s': sk.riskPointPrefix(academicYear, point), ':c': classId },
+    ...projection,
+    ExpressionAttributeNames: { ...projection.ExpressionAttributeNames, '#class': 'class_id' },
   });
+}
 
 export const listForStudent = async (schoolId, studentId, academicYear) =>
   (await Promise.all(['T1M', 'T1F', 'T2M', 'T2F', 'T3M'].map((point) =>
