@@ -209,8 +209,20 @@ function targetsFor(prediction) {
   return targets.length ? targets : [fallbackTarget(prediction)];
 }
 
-/** Subject teacher -> class teacher -> admin fallback. */
-function actorFor(staff, classId, factor, admin) {
+/** A stable 0-99 number for a key, so reseeding gives every intervention the same creator. */
+function bucket(key) {
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % 100;
+}
+
+/**
+ * Who logged it. Previously every subject intervention was attributed to that
+ * subject's teacher, so a subject teacher appeared to have logged all of them.
+ * In practice the class teacher logs some subject interventions too, so about
+ * 40% go to the class teacher; Attendance stays with the class teacher.
+ */
+function actorFor(staff, classId, factor, admin, studentId = '') {
   const subjectTeacher =
     factor === 'Attendance'
       ? null
@@ -226,7 +238,8 @@ function actorFor(staff, classId, factor, admin) {
     (teacher) => teacher.class_teacher_of === classId
   );
 
-  const chosen = subjectTeacher || classTeacher || admin;
+  const byClassTeacher = classTeacher && subjectTeacher && bucket(`${studentId}:${factor}`) < 40;
+  const chosen = (byClassTeacher ? classTeacher : subjectTeacher) || classTeacher || admin;
 
   return {
     sub: chosen.sub,
@@ -291,7 +304,7 @@ function buildPlans(predictions, terms, staff, admin) {
           `Seeded from the ${point} SHAP explanation. ` +
           'This is a suggested support activity, not evidence of causal effectiveness.',
         linked: linkFor(prediction, factor),
-        actor: actorFor(staff, prediction.class_id, factor, admin),
+        actor: actorFor(staff, prediction.class_id, factor, admin, prediction.student_id),
       });
     }
   }

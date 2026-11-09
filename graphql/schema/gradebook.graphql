@@ -734,6 +734,7 @@ type StudentFeatures {
 
 type FeatureReadinessRow {
   student_id: ID!
+  class_id: ID                    # the student's current class
   admission_no: String!
   first_name: String!
   last_name: String!
@@ -744,8 +745,8 @@ type FeatureReadinessRow {
 }
 
 type FeatureReadiness {
-  class_id: ID!
-  class_name: String!
+  class_id: ID                    # null when asked for every class (administrators)
+  class_name: String
   academic_year: Int!
   prediction_point: String!
   columns: Int!
@@ -1436,11 +1437,16 @@ type DashboardIntervention {
   intervention_id: ID!
   student_id: ID!
   student_name: String!
+  admission_no: String
+  class_id: ID
   class_name: String
   factor: String!
   method: String!
   frequency: InterventionFrequency!
   started_on: AWSDate!
+  created_by: ID
+  created_by_name: String         # the teacher who logged it (their current name)
+  assigned_by_me: Boolean!        # logged by the person viewing the dashboard
 }
 
 type DashboardAssessment {
@@ -1460,6 +1466,7 @@ type RiskDashboard {
   classes: Int!
   students: Int!
   at_risk: Int!
+  viewer_is_class_teacher: Boolean!   # class teacher of at least one class shown (not an administrator)
   at_risk_students: [DashboardAtRisk!]!
   ongoing_interventions: [DashboardIntervention!]!
   pending_assessments: [DashboardAssessment!]!
@@ -1489,6 +1496,7 @@ type SchoolRiskOverview {
   classes: [RiskGroupRow!]!
   interventions_ongoing: Int!
   interventions_logged: Int!
+  students_with_interventions: Int!
 }
 
 # ------------------------------------------------------------ year-end promotion
@@ -1573,6 +1581,7 @@ type PromotionDecision {
   overridden: Boolean
   override_reason: String
   overridden_by: ID
+  overridden_by_name: String      # the administrator's name when they overrode it
   from_class_id: ID!
   to_class_id: ID
 }
@@ -1601,6 +1610,8 @@ type PromotionRun {
   created_at: AWSDateTime
   applied_at: AWSDateTime
   reverted_at: AWSDateTime
+  reverted_by: ID
+  reverted_by_name: String        # the administrator's name when they undid it
   can_revert: Boolean!
   revert_blocked_reason: String
 }
@@ -1782,9 +1793,9 @@ type Query {
   listReportCards(school_id: ID!, class_id: ID!, term_id: ID!, checkpoint: Checkpoint!): [ReportCardEntry!]!  # Admin | class teacher
   getClassAttendance(school_id: ID!, class_id: ID!, term_id: ID!, period: AttendancePeriodName!): ClassAttendance!
   getFeatureContract(school_id: ID!): FeatureContract!
-  getFeatureReadiness(school_id: ID!, class_id: ID!, prediction_point: String!, academic_year: Int): FeatureReadiness!   # Admin | class teacher
+  getFeatureReadiness(school_id: ID!, class_id: ID, prediction_point: String!, academic_year: Int): FeatureReadiness!   # Admin | class teacher; no class_id: every class, Admin only
   getStudentFeatures(school_id: ID!, student_id: ID!, prediction_point: String!, academic_year: Int): StudentFeatures!  # Admin | class teacher
-  listRiskPredictions(school_id: ID!, class_id: ID!, prediction_point: String!, academic_year: Int): [RiskPrediction!]!   # Admin | class teacher
+  listRiskPredictions(school_id: ID!, class_id: ID, prediction_point: String!, academic_year: Int): [RiskPrediction!]!   # Admin | class teacher; no class_id: every class, Admin only
   getRiskRun(school_id: ID!, class_id: ID!, term_id: ID!, checkpoint: Checkpoint!): RiskRun                             # Admin | class teacher
   getRiskExplanation(school_id: ID!, student_id: ID!, prediction_point: String!, academic_year: Int): RiskExplanation!   # Admin | class teacher
   getRiskImportance(school_id: ID!, prediction_point: String!, academic_year: Int, class_id: ID): RiskImportance!       # Admin; class teacher with their class_id

@@ -1,10 +1,12 @@
-import { assertTenant, assertClassTeacherOrAdmin, assertGradebookRole } from '../../library/authz.js';
+import { assertTenant, assertAdmin, assertClassTeacherOrAdmin, assertGradebookRole } from '../../library/authz.js';
 import { resolveActor } from '../../library/actor.js';
 import { todayIn } from '../../library/calendar.js';
 import { FEATURE_CONTRACT, POINT_NAMES, MODEL_SUBJECTS, SUBJECT_TO_MODEL } from '../../library/features.js';
 import { validation, notFound } from '../../library/errors.js';
 import * as features from '../../library/featureStore.js';
 import * as platform from '../../library/platformRepo.js';
+import * as risk from '../../library/riskRepo.js';
+import { mapLimit } from '../../library/concurrency.js';
 
 /**
  * The risk model's inputs, as the gradebook would hand them to the model.
@@ -57,29 +59,54 @@ const counts = (row) => ({
   complete: row.missing.scores.length === 0 && row.missing.attendance.length === 0,
 });
 
+/**
+ * How complete each student's model inputs are, for one class or (administrators,
+ * no class_id) every active student in one request.
+ *
+ * A student already predicted at this point in their current class shows the
+ * missing counts stored with that prediction: the data the model actually used,
+ * read in one slim query. Only students without a prediction have their inputs
+ * rebuilt (two reads each), which is what made this slow for large classes.
+ */
 async function getFeatureReadiness(actor, { school_id, class_id, prediction_point, academic_year }) {
-  const klass = await platform.klass(school_id, class_id);
-  if (!klass) throw notFound('Class not found');
-  assertClassTeacherOrAdmin(actor, class_id);
+  let klass = null;
+  if (class_id) {
+    klass = await platform.klass(school_id, class_id);
+    if (!klass) throw notFound('Class not found');
+    assertClassTeacherOrAdmin(actor, class_id);
+  } else {
+    assertAdmin(actor);
+  }
   const point = requirePoint(prediction_point);
   const year = await yearFor(school_id, point, academic_year);
-  const terms = await features.termsOfYear(school_id, year);
-  const roster = await platform.roster(school_id, class_id);
+  const [terms, roster, predicted] = await Promise.all([
+    features.termsOfYear(school_id, year),
+    class_id ? platform.roster(school_id, class_id) : platform.listActiveStudents(school_id),
+    class_id
+      ? risk.listForClass(school_id, year, point, class_id, risk.FIELDS.readiness)
+      : risk.listForPoint(school_id, year, point, risk.FIELDS.readiness),
+  ]);
+  const stored = new Map(predicted.map((p) => [`${p.student_id}|${p.class_id}`, p]));
 
-  const students = [];
-  for (const s of roster) {
-    const row = await features.buildForStudent(school_id, s.student_id, point, year, terms);
-    students.push({
+  // Each unpredicted student's features are several reads; eight students at a time instead of one.
+  const students = await mapLimit(roster, 8, async (s) => {
+    const p = stored.get(`${s.student_id}|${s.class_id}`);
+    const status = p
+      ? { missing_scores: p.missing_scores ?? 0, missing_attendance: p.missing_attendance ?? 0, notes: [],
+          complete: !p.missing_scores && !p.missing_attendance }
+      : counts(await features.buildForStudent(school_id, s.student_id, point, year, terms));
+    return {
       student_id: s.student_id,
+      class_id: s.class_id ?? null,
       admission_no: s.admission_no,
       first_name: s.first_name,
       last_name: s.last_name,
-      ...counts(row),
-    });
-  }
+      ...status,
+    };
+  });
   return {
-    class_id,
-    class_name: klass.name,
+    class_id: class_id ?? null,
+    class_name: klass?.name ?? null,
     academic_year: year,
     prediction_point: point,
     columns: FEATURE_CONTRACT[point].length,

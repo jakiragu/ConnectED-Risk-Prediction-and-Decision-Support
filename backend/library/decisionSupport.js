@@ -55,6 +55,15 @@ export function riskScope({ isAdmin, isClassTeacher, subjects = [] }) {
 
 export const canSeeFactor = (scope, factor) => Boolean(scope && (scope.all || scope.factors.has(factor)));
 
+/**
+ * The ongoing interventions in a class that concern a person: every factor for
+ * administrators and the class teacher, only their own subjects for a subject
+ * teacher, whoever logged them (a class teacher's Mathematics intervention
+ * concerns the Mathematics teacher). Only students still on the roster count.
+ */
+export const interventionsThatConcern = (scope, items, studentIds) =>
+  (items || []).filter((i) => canSeeFactor(scope, i.factor) && i.status === INTERVENTION_STATUS.ONGOING && studentIds.has(i.student_id));
+
 export const scopeView = (scope) => ({ all: Boolean(scope?.all), factors: scope ? [...scope.factors] : [] });
 
 // ---------------------------------------------------------------- explaining

@@ -42,7 +42,7 @@ function RunCard({ run, onUndo, busy }) {
       <div className="hint">
         {run.created_by_name ? `By ${run.created_by_name}. ` : ''}
         {run.applied_at ? `Applied ${new Date(run.applied_at).toLocaleString()}. ` : ''}
-        {run.reverted_at ? `Undone ${new Date(run.reverted_at).toLocaleString()}.` : ''}
+        {run.reverted_at ? `Undone ${new Date(run.reverted_at).toLocaleString()}${run.reverted_by_name ? ` by ${run.reverted_by_name}` : ''}.` : ''}
       </div>
       <Summary s={run.summary} />
       {done && (
@@ -51,7 +51,7 @@ function RunCard({ run, onUndo, busy }) {
           {` Teacher strategy: ${{ STAY: 'Stay with the form', FOLLOW: 'Follow the students', MANUAL: 'Assign manually' }[run.teacher_strategy]}.`}
         </div>
       )}
-      {run.decisions?.length > 0 && <details><summary>Applied decisions and overrides ({run.decisions.length})</summary><div className="table-wrap"><table><thead><tr><th>Student</th><th>Average / pass mark</th><th>Automatic</th><th>Final decision</th><th>Override reason / administrator</th></tr></thead><tbody>{run.decisions.map((d) => <tr key={d.student_id}><td>{d.name}</td><td>{d.average ?? '—'} / {d.pass_mark ?? '—'}</td><td>{d.automatic_action || 'Legacy run'}</td><td>{d.action}</td><td>{d.overridden ? `${d.override_reason || 'No reason supplied'} · ${d.overridden_by}` : '—'}</td></tr>)}</tbody></table></div></details>}
+      {run.decisions?.length > 0 && <details><summary>Applied decisions and overrides ({run.decisions.length})</summary><div className="table-wrap"><table><thead><tr><th>Student</th><th>Average / pass mark</th><th>Automatic</th><th>Final decision</th><th>Override reason / administrator</th></tr></thead><tbody>{run.decisions.map((d) => <tr key={d.student_id}><td>{d.name}</td><td>{d.average ?? '—'} / {d.pass_mark ?? '—'}</td><td>{d.automatic_action || 'Legacy run'}</td><td>{d.action}</td><td>{d.overridden ? <>{d.override_reason || 'No reason supplied'} · {d.overridden_by_name || 'Unknown administrator'}{d.overridden_by && <span className="hint"> ({d.overridden_by})</span>}</> : '—'}</td></tr>)}</tbody></table></div></details>}
       {run.skipped.length > 0 && (
         <Notice tone="warn">
           {plural(run.skipped.length, 'student was', 'students were')} left as they were because someone changed them after the plan was made:{' '}
@@ -161,7 +161,7 @@ export default function Promotion() {
   const [overrides, setOverrides] = useState({});
   const [plan, setPlan] = useState(null);
   const [runs, setRuns] = useState([]);
-  const [teacherStrategy, setTeacherStrategy] = useState('STAY');
+  const [teacherStrategy, setTeacherStrategy] = useState('FOLLOW'); // the API's default when a caller omits it (school-service strategyOf)
   const [excludedTeachers, setExcludedTeachers] = useState([]);
   const [stage, setStage] = useState(1);
   const [search, setSearch] = useState('');

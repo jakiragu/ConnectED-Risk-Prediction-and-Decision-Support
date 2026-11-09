@@ -9,7 +9,7 @@ const PREDICTION_FIELDS = `
 `;
 
 export const LIST_RISK_PREDICTIONS = `
-  query ListRiskPredictions($school_id: ID!, $class_id: ID!, $prediction_point: String!, $academic_year: Int) {
+  query ListRiskPredictions($school_id: ID!, $class_id: ID, $prediction_point: String!, $academic_year: Int) {
     listRiskPredictions(school_id: $school_id, class_id: $class_id, prediction_point: $prediction_point, academic_year: $academic_year) {
       ${PREDICTION_FIELDS}
     }
