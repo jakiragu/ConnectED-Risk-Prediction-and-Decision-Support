@@ -81,7 +81,7 @@ export function AuthProvider({ children }) {
 
   /** One renewal at a time, never longer than RENEW_TIMEOUT_MS. */
   const renew = (s) => {
-    renewing.current ??= within(refresh(s.refreshToken), RENEW_TIMEOUT_MS)
+    renewing.current ??= within(refresh(s.refreshToken, undefined, s.oauth), RENEW_TIMEOUT_MS)
       .then((next) => { failedAt.current = 0; save(next); return next; })
       .catch((e) => { failedAt.current = Date.now(); throw e; })
       .finally(() => { renewing.current = null; });

@@ -4,3 +4,7 @@ local/.data
 /frontend/react-app/dist/
 __pycache__/
 *.pyc
+# Generated AWS deployment state and local secrets
+.env.*.local
+deploy/aws/.build/
+deploy/aws/.state/

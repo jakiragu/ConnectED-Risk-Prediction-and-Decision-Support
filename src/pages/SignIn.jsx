@@ -1,7 +1,8 @@
+import { startGoogle } from '../auth/oauth.js';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { completeNewPassword, signInWithPassword } from '../auth/cognito.jsx';
+import { completeNewPassword, signInWithPassword, requestPasswordReset, confirmPasswordReset } from '../auth/cognito.jsx';
 import { Field } from '../components/Field.jsx';
 
 export default function SignIn() {
@@ -34,10 +35,13 @@ export default function SignIn() {
     if (resetStep === 'email') {
       if (!resetEmail.trim()) return;
 
-      setResetNotice(
-        'Frontend preview: no verification email has been sent. Cognito integration is required.'
-      );
-      setResetStep('code');
+      setBusy(true); setError(null);
+      try {
+        await requestPasswordReset(resetEmail);
+        setResetNotice('If this account can recover by email, a code has been sent. Check your inbox and spam folder.');
+        setResetStep('code');
+      } catch (err) { setError(err.message); }
+      finally { setBusy(false); }
       return;
     }
 
@@ -57,10 +61,12 @@ export default function SignIn() {
         return;
       }
 
-      setResetNotice(
-        'Frontend preview only: the code has not been verified and your password has not been changed.'
-      );
-      setResetStep('complete');
+      setBusy(true); setError(null);
+      try {
+        await confirmPasswordReset(resetEmail, resetCode, resetPassword);
+        setResetStep('complete');
+      } catch (err) { setError(err.message); }
+      finally { setBusy(false); }
       return;
     }
 
@@ -108,7 +114,7 @@ export default function SignIn() {
             </p>
 
             <div className="auth-notice">
-              Frontend preview only. Email delivery is not yet connected.
+              We will send a recovery code to your verified email address.
             </div>
 
             <Field label="Email address" htmlFor="resetEmail">
@@ -123,7 +129,7 @@ export default function SignIn() {
               />
             </Field>
 
-            <button className="btn" type="submit">
+            <button className="btn" type="submit" disabled={busy}>
               Continue
             </button>
 
@@ -147,7 +153,7 @@ export default function SignIn() {
             </p>
 
             <div className="auth-notice">
-              Frontend preview only. No verification code has been sent.
+              Check your inbox and spam folder for your recovery code.
             </div>
 
             <Field label="Verification code" htmlFor="resetCode">
@@ -193,8 +199,8 @@ export default function SignIn() {
               </div>
             )}
 
-            <button className="btn" type="submit">
-              Preview password reset
+            <button className="btn" type="submit" disabled={busy}>
+              Reset password
             </button>
 
             <button
@@ -210,15 +216,14 @@ export default function SignIn() {
           </>
         ) : resetStep === 'complete' ? (
           <>
-            <h2>Password reset preview</h2>
+            <h2>Password updated</h2>
 
             <p className="hint">
-              You have reached the end of the frontend password-reset preview.
-              No password has actually been changed.
+              Your password has been changed. Sign in with your new password.
             </p>
 
             <div className="auth-notice">
-              Complete the AWS Cognito integration to enable real password recovery.
+              Your new password is ready to use.
             </div>
 
             <button
@@ -290,11 +295,7 @@ export default function SignIn() {
                   </div>
 
                   <button className="btn google-btn" type="button"
-                    onClick={() =>
-                      setGoogleNotice(
-                        'Google sign-in will be available after the AWS Cognito integration.'
-                      )
-                    }
+                    onClick={() => startGoogle('school', rememberMe).catch(err => setGoogleNotice(err.message))}
                   >
                     <span className="google-mark" aria-hidden="true">G</span>
                     Continue with Google

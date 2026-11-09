@@ -51,7 +51,7 @@ export function AngazaAuthProvider({ children }) {
   };
 
   const renew = (s) => {
-    renewing.current ??= refresh(s.refreshToken, ANGAZA_CLIENT_ID)
+    renewing.current ??= refresh(s.refreshToken, ANGAZA_CLIENT_ID, s.oauth)
       .then((next) => { save(next); return next; })
       .finally(() => { renewing.current = null; });
     return renewing.current;

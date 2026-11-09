@@ -42,7 +42,7 @@ async function send(token, query, variables) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(token ? { authorization: endpoint().includes('.appsync-api.') ? token : `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ query, variables }),
       signal: controller.signal,
@@ -66,10 +66,10 @@ async function send(token, query, variables) {
   }
   if (body.errors?.length) {
     const e = body.errors[0];
-    if (e.extensions?.errorType === 'SchoolSuspended' && typeof window !== 'undefined') {
+    if ((e.errorType || e.extensions?.errorType) === 'SchoolSuspended' && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(SCHOOL_SUSPENDED_EVENT, { detail: e.message }));
     }
-    throw new GraphQLError(e.message, e.extensions?.errorType, e.extensions?.field);
+    throw new GraphQLError(e.message, e.errorType || e.extensions?.errorType, e.extensions?.field);
   }
   return body.data;
 }

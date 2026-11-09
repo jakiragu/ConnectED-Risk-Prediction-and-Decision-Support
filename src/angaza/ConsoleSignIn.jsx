@@ -1,3 +1,4 @@
+import { startGoogle, hostedRecovery } from '../auth/oauth.js';
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ANGAZA_CLIENT_ID, completeNewPassword, signInWithPassword } from '../auth/cognito.jsx';
@@ -101,6 +102,10 @@ export default function ConsoleSignIn() {
               </Field>
             </>
           )}
+          {!challenge && <>
+            <button className="btn link" type="button" onClick={() => hostedRecovery('angaza').catch(e => setError(e.message))}>Forgot password?</button>
+            <button className="btn google-btn" type="button" onClick={() => startGoogle('angaza', remember).catch(e => setError(e.message))}>Continue with Google</button>
+          </>}
           <button className="btn" type="submit" disabled={busy}>
             {busy ? 'Logging in…' : challenge ? 'Save password and log in' : 'Log in'}
           </button>

@@ -1,3 +1,4 @@
+import OAuthCallback from '../auth/OAuthCallback.jsx';
 import { useEffect, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AngazaAuthProvider, useAngaza } from './AngazaAuth.jsx';
@@ -18,6 +19,7 @@ export default function AngazaApp() {
   return (
     <AngazaAuthProvider>
       <Routes>
+        <Route path="auth/callback" element={<OAuthCallback platform />} />
         <Route path="sign-in" element={<ConsoleSignIn />} />
         <Route element={<RequireStaff><ConsoleLayout /></RequireStaff>}>
           <Route index element={<SchoolsPage />} />

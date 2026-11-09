@@ -1,6 +1,9 @@
+import { refreshOAuth } from './oauth.js';
 import {
   CognitoIdentityProviderClient,
   InitiateAuthCommand,
+  ForgotPasswordCommand,
+  ConfirmForgotPasswordCommand,
   RespondToAuthChallengeCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 
@@ -18,7 +21,7 @@ const MESSAGES = {
   NotAuthorizedException: 'Incorrect email or password',
   UserNotFoundException: 'Incorrect email or password',
   InvalidPasswordException: 'Choose a password of at least 8 characters with upper and lower case letters, a number and a symbol',
-  PasswordResetRequiredException: 'Your password was reset. Ask an administrator for a temporary password.',
+  PasswordResetRequiredException: 'Your password must be reset. Use Forgot password to choose a new one.',
 };
 const friendly = (e) => new Error(MESSAGES[e.name] || e.message || 'Sign-in failed');
 
@@ -58,11 +61,23 @@ export async function completeNewPassword(email, session, newPassword, clientId 
   }
 }
 
-export async function refresh(refreshToken, clientId = CLIENT_ID) {
+export async function refresh(refreshToken, clientId = CLIENT_ID, oauth = false) {
+  if (oauth) return refreshOAuth(refreshToken, clientId);
   const res = await client.send(new InitiateAuthCommand({
     ClientId: clientId,
     AuthFlow: 'REFRESH_TOKEN_AUTH',
     AuthParameters: { REFRESH_TOKEN: refreshToken },
   }));
   return tokensFrom(res.AuthenticationResult, refreshToken);
+}
+export async function requestPasswordReset(email, clientId = CLIENT_ID) {
+  try {
+    await client.send(new ForgotPasswordCommand({ ClientId: clientId, Username: email.trim().toLowerCase() }));
+  } catch (e) { throw friendly(e); }
+}
+export async function confirmPasswordReset(email, code, password, clientId = CLIENT_ID) {
+  try {
+    await client.send(new ConfirmForgotPasswordCommand({ ClientId: clientId,
+      Username: email.trim().toLowerCase(), ConfirmationCode: code.trim(), Password: password }));
+  } catch (e) { throw friendly(e); }
 }
