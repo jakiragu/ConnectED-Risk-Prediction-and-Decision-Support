@@ -13,14 +13,14 @@ function config(realm) {
   if (!c?.domain || !c.clientId || !c.pool) throw new Error('Cloud sign-in has not been configured for this portal.');
   return { ...c, domain: c.domain.replace(/\/$/, ''), redirect: location.origin + c.path };
 }
-async function redirect(realm, remember, recovery) {
+async function redirect(realm, remember, recovery, retried = false) {
   const c = config(realm);
   const verifier = random(), state = random(), nonce = random();
   const challenge = b64(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
-  sessionStorage.setItem(key(realm), JSON.stringify({ verifier, state, nonce, remember, created: Date.now() }));
+  sessionStorage.setItem(key(realm), JSON.stringify({ verifier, state, nonce, remember, retried, created: Date.now() }));
   const q = new URLSearchParams({ client_id: c.clientId, response_type: 'code', redirect_uri: c.redirect,
     scope: 'openid email profile', state, nonce, code_challenge: challenge, code_challenge_method: 'S256' });
-  if (!recovery) { q.set('identity_provider', 'Google'); q.set('prompt', 'select_account'); }
+  if (!recovery) { q.set('identity_provider', 'Google'); if (!retried) q.set('prompt', 'select_account'); }
   location.assign(`${c.domain}/${recovery ? 'forgotPassword' : 'oauth2/authorize'}?${q}`);
 }
 export const startGoogle = (realm, remember = false) => redirect(realm, remember, false);
@@ -45,7 +45,17 @@ async function finish(realm) {
   const saved = JSON.parse(sessionStorage.getItem(key(realm)) || 'null');
   sessionStorage.removeItem(key(realm));
   if (!saved || saved.state !== q.get('state') || Date.now() - saved.created > 15 * 60_000) throw new Error('This sign-in attempt expired or could not be verified. Start again.');
-  if (q.get('error')) throw new Error(q.get('error_description') || q.get('error'));
+  const failure = q.get('error_description') || q.get('error');
+  if (failure) {
+    // Cognito often refuses the very first sign-in right after the pre-sign-up trigger links the
+    // Google identity; the same sign-in then succeeds. Retry once, automatically.
+    if (/already found an entry for username/i.test(failure) && !saved.retried) {
+      await redirect(realm, saved.remember, false, true);
+      return new Promise(() => {}); // the page is leaving for Google again
+    }
+    // A refusal from the trigger arrives as "PreSignUp failed with error <its message>."
+    throw new Error(failure.replace(/^PreSignUp failed with error\s*/i, '').trim());
+  }
   if (!q.get('code')) throw new Error('No authorization code received.');
   const body = await exchange(c, { grant_type: 'authorization_code', code: q.get('code'), redirect_uri: c.redirect, code_verifier: saved.verifier });
   const claims = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(body.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')), ch => ch.charCodeAt(0))));

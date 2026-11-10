@@ -69,7 +69,7 @@ async function send(token, query, variables) {
     if ((e.errorType || e.extensions?.errorType) === 'SchoolSuspended' && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(SCHOOL_SUSPENDED_EVENT, { detail: e.message }));
     }
-    throw new GraphQLError(e.message, e.errorType || e.extensions?.errorType, e.extensions?.field);
+    throw new GraphQLError(e.message, e.errorType || e.extensions?.errorType, e.errorInfo?.field || e.extensions?.field);
   }
   return body.data;
 }

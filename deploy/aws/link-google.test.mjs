@@ -30,3 +30,17 @@ test('Angaza linking requires PlatformAdmin',async()=>{const u=user();u.Attribut
 test('non-authoritative consumer Google email refused',async()=>{const e=event();e.request.userAttributes.email='teacher@example.com';await assert.rejects(mock().handler(e));});
 test('Workspace requires matching signed hosted domain',async()=>{const e=event();e.request.userAttributes.email='teacher@example.com';e.request.userAttributes['custom:google_hd']='example.com';await mock().handler(e);});
 test('administrative invitations pass through',async()=>{const e=event();e.triggerSource='PreSignUp_AdminCreateUser';const {handler,calls}=mock();assert.equal(await handler(e),e);assert.equal(calls.length,0);});
+test('lower-case federated username from a case-insensitive pool is linked as Google', async () => {
+  const e = event(); e.userName = 'google_12345';
+  const { handler, calls } = mock(); await handler(e);
+  assert.equal(calls.at(-1).input.SourceUser.ProviderName, 'Google');
+  assert.equal(calls.at(-1).input.SourceUser.ProviderAttributeValue, '12345');
+});
+test('an existing lower-case Google user is never chosen as the account to link to', async () => {
+  const g = user(); g.Username = 'google_999';
+  await assert.rejects(mock([g]).handler(event()), /temporary password/);
+});
+test('a non-Google federated sign-up is refused', async () => {
+  const e = event(); e.userName = 'facebook_1';
+  await assert.rejects(mock().handler(e), /administrator/);
+});

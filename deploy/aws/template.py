@@ -108,7 +108,7 @@ def make_template():
         for field in re.findall(r'^    (\w+):',body,re.M):
             add(parent+field[0].upper()+field[1:],'AWS::AppSync::Resolver',{'ApiId':att('Api','ApiId'),'TypeName':parent,'FieldName':field,'DataSourceName':att('DataSource','Name'),
                 'RequestMappingTemplate':'{"version":"2018-05-29","operation":"Invoke","payload":$util.toJson($context)}',
-                'ResponseMappingTemplate':'#if($ctx.error)\n$util.error($ctx.error.message,$ctx.error.type)\n#end\n#if($ctx.result.error)\n$util.error($ctx.result.error.message,$ctx.result.error.type)\n#end\n$util.toJson($ctx.result.data)'},DependsOn=['Schema'])
+                'ResponseMappingTemplate':'#if($ctx.error)\n$util.error($ctx.error.message,$ctx.error.type)\n#end\n#if($ctx.result.error)\n$util.error($ctx.result.error.message,$ctx.result.error.type,$ctx.result.data,{\"field\":$util.defaultIfNull($ctx.result.error.field,\"\")})\n#end\n$util.toJson($ctx.result.data)'},DependsOn=['Schema'])
     outputs={k:{'Value':v} for k,v in {'SiteUrl':sub('https://${Web.DomainName}'),'DistributionId':ref('Web'),'WebBucket':ref('WebBucket'),'ReportBucket':ref('ReportBucket'),'ModelBucket':ref('ModelBucket'),
         'TableName':ref('Table'),'GraphqlUrl':att('Api','GraphQLUrl'),'SchoolPoolId':ref('SchoolPool'),'SchoolClientId':ref('SchoolClient'),'AngazaPoolId':ref('AngazaPool'),'AngazaClientId':ref('AngazaClient'),
         'SchoolDomain':sub('https://${SchoolDomain}.auth.${AWS::Region}.amazoncognito.com'),'AngazaDomain':sub('https://${AngazaDomain}.auth.${AWS::Region}.amazoncognito.com'),

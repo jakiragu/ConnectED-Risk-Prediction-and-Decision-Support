@@ -49,31 +49,28 @@ export default function ConsoleSignIn() {
 
   const wrongAccount = error === 'Incorrect email or password';
 
+  // Same layout and classes as the school sign-in (src/pages/SignIn.jsx), so both portals look alike.
   return (
-    <div className="console page console-signin">
-      <div className="console-signin-head">
+    <div className="page" style={{ minHeight: '100vh', justifyContent: 'center' }}>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ color: 'var(--muted)', margin: 0 }}>Welcome back to</p>
         <div className="brand-name">ConnectED</div>
-        <div className="console-tag dark">Angaza console</div>
+        <div className="brand-sub">Angaza console</div>
       </div>
-      <form className="card form-card" onSubmit={submit}>
+
+      <form className="card form-card" onSubmit={submit} style={{ marginTop: 0 }}>
         <div className="stack">
-          {!challenge ? (
-            <>
-              <h1 className="h2">Log in with your Angaza account</h1>
-              <p className="hint">
-                For Angaza staff who register schools and support their administrators.
-                Teachers and school administrators: <Link to="/sign-in">log in to your school</Link>.
-              </p>
-            </>
+          <h2>{challenge ? 'Choose your own password.' : 'Log in with your Angaza account.'}</h2>
+          {challenge ? (
+            <div className="hint">You logged in with a temporary password. Choose the one you will use from now on.</div>
           ) : (
-            <>
-              <h1 className="h2">Choose your own password</h1>
-              <p className="hint">You logged in with a temporary password. Choose the one you will use from now on.</p>
-            </>
+            <p className="hint" style={{ margin: 0 }}>
+              Teachers and school administrators: <Link to="/sign-in">log in to your school</Link>.
+            </p>
           )}
 
           {error && (
-            <div className="notice error" role="alert">
+            <div className="error" role="alert">
               {error}
               {wrongAccount && <div>Check that this is your Angaza email. School accounts cannot open the console.</div>}
             </div>
@@ -82,15 +79,22 @@ export default function ConsoleSignIn() {
           {!challenge ? (
             <>
               <Field label="Email" htmlFor="a-email">
-                <input id="a-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <input id="a-email" type="email" autoComplete="username" placeholder="Enter Angaza email address"
+                  value={email} onChange={(e) => setEmail(e.target.value)} required />
               </Field>
               <Field label="Password" htmlFor="a-password">
-                <input id="a-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                <input id="a-password" type="password" autoComplete="current-password" placeholder="•••••••"
+                  value={password} onChange={(e) => setPassword(e.target.value)} required />
               </Field>
-              <label className="remember-row" htmlFor="a-remember">
-                <input id="a-remember" type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                <span>Keep me logged in on this device</span>
-              </label>
+              <div className="auth-options">
+                <label className="remember-row" htmlFor="a-remember">
+                  <input id="a-remember" type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                  <span>Remember me on this device</span>
+                </label>
+                <button type="button" className="btn link" onClick={() => hostedRecovery('angaza').catch((err) => setError(err.message))}>
+                  Forgot password?
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -102,13 +106,20 @@ export default function ConsoleSignIn() {
               </Field>
             </>
           )}
-          {!challenge && <>
-            <button className="btn link" type="button" onClick={() => hostedRecovery('angaza').catch(e => setError(e.message))}>Forgot password?</button>
-            <button className="btn google-btn" type="button" onClick={() => startGoogle('angaza', remember).catch(e => setError(e.message))}>Continue with Google</button>
-          </>}
+
           <button className="btn" type="submit" disabled={busy}>
-            {busy ? 'Logging in…' : challenge ? 'Save password and log in' : 'Log in'}
+            {busy ? 'Please wait' : challenge ? 'Set password and log in' : 'Log in'}
           </button>
+
+          {!challenge && (
+            <>
+              <div className="auth-divider"><span>OR</span></div>
+              <button className="btn google-btn" type="button" onClick={() => startGoogle('angaza', remember).catch((err) => setError(err.message))}>
+                <span className="google-mark" aria-hidden="true">G</span>
+                Continue with Google
+              </button>
+            </>
+          )}
         </div>
       </form>
     </div>
