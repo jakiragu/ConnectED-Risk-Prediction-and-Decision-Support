@@ -8,3 +8,7 @@ __pycache__/
 .env.*.local
 deploy/aws/.build/
 deploy/aws/.state/
+
+# Demo baselines contain student and account data
+.demo-backups/
+.demo-data/

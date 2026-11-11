@@ -18,9 +18,10 @@ def run(args, *, capture=False, env=None, input=None):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('phase',choices=['check','deploy','google','web','model','staff','outputs'])
+    p.add_argument('phase',choices=['check','deploy','google','mail','web','model','staff','outputs'])
     p.add_argument('--region',default='eu-west-1');p.add_argument('--stack',default='connected-demo')
     p.add_argument('--email');p.add_argument('--first');p.add_argument('--last')
+    p.add_argument('--sender',help='mail phase: the address ConnectED emails come from, e.g. no-reply@yourdomain.org')
     p.add_argument('--model',default='ml/models/logreg-v1');p.add_argument('--reuse-image',action='store_true')
     a=p.parse_args()
     if not re.fullmatch(r'[a-z][a-z0-9-]{1,29}',a.stack): p.error('stack must be 2-30 lower-case letters, digits or hyphens, beginning with a letter')
@@ -44,7 +45,9 @@ def main():
             'RISK_SCORER_FUNCTION':o['ScorerFunction'],'RISK_PREDICTION_FUNCTION':o['PredictionFunction'],
             'VITE_AWS_REGION':a.region,'VITE_GRAPHQL_ENDPOINT':o['GraphqlUrl'],
             'VITE_COGNITO_CLIENT_ID':o['SchoolClientId'],'VITE_COGNITO_USER_POOL_ID':o['SchoolPoolId'],'VITE_COGNITO_DOMAIN':o['SchoolDomain'],
-            'VITE_PLATFORM_COGNITO_CLIENT_ID':o['AngazaClientId'],'VITE_PLATFORM_COGNITO_USER_POOL_ID':o['AngazaPoolId'],'VITE_PLATFORM_COGNITO_DOMAIN':o['AngazaDomain']}
+            'VITE_PLATFORM_COGNITO_CLIENT_ID':o['AngazaClientId'],'VITE_PLATFORM_COGNITO_USER_POOL_ID':o['AngazaPoolId'],'VITE_PLATFORM_COGNITO_DOMAIN':o['AngazaDomain'],
+            # The staff command emails its invitation the same way the deployed app does.
+            'MAIL_FROM':state.get('mail_from',''),'SITE_URL':o['SiteUrl']}
         for k in ['DDB_ENDPOINT','S3_ENDPOINT','EVENTS_ENDPOINT','SFN_ENDPOINT','COGNITO_ENDPOINT','LAMBDA_ENDPOINT','VITE_COGNITO_ENDPOINT']: values[k]=''
         path=ROOT/'.env.aws.local';path.write_text('\n'.join(f'{k}={v}' for k,v in values.items())+'\n')
         return {**env,**values,'DOTENV_CONFIG_PATH':str(path)}
@@ -65,7 +68,7 @@ def main():
         run(['node','deploy/aws/bundle.mjs'],env=env)
         zip_path=BUILD/'backend.zip'
         with zipfile.ZipFile(zip_path,'w',zipfile.ZIP_DEFLATED) as z:
-            for name in ['api','prediction','report','link']: z.write(BUILD/(name+'.mjs'),name+'.mjs')
+            for name in ['api','prediction','report','link','authmail']: z.write(BUILD/(name+'.mjs'),name+'.mjs')
         code_key='backend/'+hashlib.sha256(zip_path.read_bytes()).hexdigest()+'.zip'
         bucket=f'{a.stack}-{account}-{a.region}-artifacts'
         # An existing inaccessible bucket is an error, never a reason to reuse someone else's bucket.
@@ -91,10 +94,34 @@ def main():
             image_digest=obj('ecr','describe-images','--repository-name',repo,'--image-ids','imageTag='+digest)['imageDetails'][0]['imageDigest']
             state['image']=uri+'@'+image_digest
         state.update(artifact_bucket=bucket,code_key=code_key);save()
-    if a.phase in ['deploy','google']:
+    if a.phase=='mail':
+        if not all(k in state for k in ['artifact_bucket','code_key','image']): raise RuntimeError('Run deploy first in this same folder/account/region.')
+        if not state.get('authmail_built'): raise RuntimeError('Run deploy once with this version of the code first: it uploads the email functions the mail phase switches on.')
+        sender=(a.sender or '').strip().lower()
+        if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',sender): p.error('mail needs --sender you@example.org')
+        try: identity=obj('sesv2','get-email-identity','--email-identity',sender)
+        except RuntimeError as e:
+            if 'NotFoundException' not in str(e): raise
+            aws('sesv2','create-email-identity','--email-identity',sender)
+            identity={'VerifiedForSendingStatus':False}
+            print(f'Amazon SES sent a verification email to {sender}. Open it and click the link (check spam).')
+        while not identity.get('VerifiedForSendingStatus'):
+            input('Press Enter once you have clicked the verification link (Ctrl+C to stop)... ')
+            identity=obj('sesv2','get-email-identity','--email-identity',sender)
+            if not identity.get('VerifiedForSendingStatus'): print('Not verified yet. The link can take a minute to register.')
+        print(f'{sender} is verified for sending.')
+        account_info=obj('sesv2','get-account')
+        if not account_info.get('ProductionAccessEnabled'):
+            print('\nSES IS IN THE SANDBOX for this account and region: it delivers ONLY to verified addresses.')
+            print('  For a live test, verify each recipient:  aws sesv2 create-email-identity --email-identity person@example.org')
+            print('  For real use, request production access: SES console -> Account dashboard -> Request production access.')
+            print('  Until then, emails to unverified people fail and the app shows their temporary password instead.\n')
+        state['mail_from']=sender;save()
+    if a.phase in ['deploy','google','mail']:
         if not all(k in state for k in ['artifact_bucket','code_key','image']): raise RuntimeError('Run deploy first in this same folder/account/region.')
         template=BUILD/'template.json';template.write_text(json.dumps(make_template(),indent=2))
         params=[{'ParameterKey':k,'ParameterValue':v} for k,v in {'ArtifactBucket':state['artifact_bucket'],'CodeKey':state['code_key'],'ScorerImage':state['image']}.items()]
+        if a.phase=='mail': params.append({'ParameterKey':'MailFrom','ParameterValue':state['mail_from']})
         if a.phase=='google':
             o=outputs()
             print('Register BOTH redirect URIs in one Google OAuth Web Application:')
@@ -111,12 +138,14 @@ def main():
                 '--capabilities','CAPABILITY_IAM','--parameter-overrides','file://'+temp,'--no-fail-on-empty-changeset',capture=False)
         finally: Path(temp).unlink(missing_ok=True)
         if a.phase=='google': state['google_enabled']=True;save()
+        if a.phase=='deploy': state['authmail_built']=True;save()
         o=outputs();appenv(o)
         if a.phase=='deploy':
             run(['node','local/publish-model.js',a.model],env=appenv(o))
         web(o)
         print('\nSchool portal: '+o['SiteUrl']+'/sign-in\nAngaza portal: '+o['SiteUrl']+'/angaza')
         if not state.get('google_enabled'): print('Google is not enabled yet. Complete Google Console setup, then run the google phase.')
+        if not state.get('mail_from'): print('Email uses the Cognito default sender and the app does not email sign-in details yet. Run the mail phase (see deploy/aws/README.md).')
         return
     o=outputs()
     if a.phase=='outputs':

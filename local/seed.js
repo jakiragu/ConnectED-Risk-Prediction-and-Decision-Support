@@ -23,7 +23,14 @@ const DEV_PASSWORD = process.env.SEED_PASSWORD || 'Gradebook-Dev-2026!';
 const SCHOOL = 'sch_saint_innocent';
 const TERM = 'term_2026_2';
 
-const STREAMS = ['North', 'East', 'South', 'West'];
+const DEMO_SMALL = process.argv.includes('--demo-small');
+const STREAMS = DEMO_SMALL ? ['South'] : ['North', 'East', 'South', 'West'];
+// The full seed publishes Term 1 and leaves Term 2 Midterm for the live demonstration. The small
+// demo publishes Terms 1 and 2 and leaves Term 3 Midterm live instead: on the deployed site the
+// latest term (Term 3) is what every page opens on, so the live exercise is the first thing shown,
+// and four published checkpoints give risk trends, history and report cards something to show.
+const LIVE_POINT = DEMO_SMALL ? 'T3M' : 'T2M';
+const PUBLISHED_TERM_NUMBERS = DEMO_SMALL ? [1, 2] : [1];
 
 // Subjects used by the risk model. CRE remains the gradebook subject;
 // the feature builder maps it to Religious_Education.
@@ -271,7 +278,7 @@ for (const term of TERMS) {
 // Regular teaching classes.
 const classes = [];
 
-for (const form of [2, 4]) {
+for (const form of (DEMO_SMALL ? [4] : [2, 4])) {
   for (const stream of STREAMS) {
     const classId = `cls_f${form}${stream.toLowerCase()}`;
     classes.push({ classId, form, stream });
@@ -297,7 +304,7 @@ const TEST_CLASS = {
   name: 'Form 4 Test',
 };
 
-// Deliberately missing T2M entries for the live gradebook demonstration.
+// Deliberately missing entries at LIVE_POINT for the live gradebook demonstration.
 const T2M_DEMO_MISSING = {
   scores: [
     { student_id: 'stu_19001', subject: 'Kiswahili' },
@@ -394,6 +401,10 @@ const TEACHERS = [
   },
 ];
 
+for (const teacher of TEACHERS) {
+  teacher.assignments = teacher.assignments.filter(a => allClassIds.includes(a.class_id));
+  if (!allClassIds.includes(teacher.class_teacher_of)) teacher.class_teacher_of = null;
+}
 const janeClasses = TEACHERS[0].assignments.map((a) => a.class_id);
 
 // Existing named students.
@@ -417,6 +428,10 @@ const named = [
     classId: 'cls_f2north',
   },
 ];
+
+for (let i = named.length - 1; i >= 0; i--) {
+  if (!allClassIds.includes(named[i].classId)) named.splice(i, 1);
+}
 
 let adm = 17000;
 const students = [];
@@ -465,6 +480,26 @@ TEST_STUDENTS.forEach(([first_name, last_name], i) => {
     class_id: TEST_CLASS.classId,
   });
 });
+
+// Small demo only: a few students who left in an earlier year, so the Past students page has
+// content. They go straight into the records, not into `students`, so no marks, attendance or
+// predictions are generated for them; every roster reads active students only.
+const PAST_STUDENTS = DEMO_SMALL ? [
+  ['16001', 'Grace', 'Wairimu', 'GRADUATED'], ['16002', 'Kevin', 'Omondi', 'GRADUATED'],
+  ['16003', 'Faith', 'Njeri', 'GRADUATED'], ['16004', 'Samuel', 'Kiprop', 'GRADUATED'],
+  ['16005', 'Mercy', 'Akinyi', 'LEFT'], ['16006', 'Dennis', 'Mwangi', 'LEFT'],
+] : [];
+for (const [admission_no, first_name, last_name, kind] of PAST_STUDENTS) {
+  const left = kind === 'LEFT';
+  items.push({
+    PK: pk(SCHOOL), SK: sk.student(`stu_${admission_no}`), entity: 'Student', school_id: SCHOOL, _version: 2,
+    student_id: `stu_${admission_no}`, admission_no, first_name, last_name, class_id: 'cls_f4south',
+    ...(left
+      ? { status: 'INACTIVE', left_year: 2025, departure_kind: 'LEFT', deactivation_reason: 'Transferred to another school', deactivation_date: '2025-11-28' }
+      : { status: 'GRADUATED', graduation_year: 2025 }),
+  });
+  items.push({ PK: pk(SCHOOL), SK: sk.admissionNo(admission_no), entity: 'AdmissionNo', admission_no, student_id: `stu_${admission_no}` });
+}
 
 /* Create the student and admission-number records. */
 for (const student of students) {
@@ -526,6 +561,12 @@ function seedAssessmentsAndScores(enteredBy) {
     //   title: 'Term 3 Midterm',
     // },
   ];
+  if (DEMO_SMALL) {
+    checkpoints.push(
+      { point: 'T2F', term_id: 'term_2026_2', assessment_type: 'ENDTERM', title: 'Term 2 Endterm' },
+      { point: 'T3M', term_id: 'term_2026_3', assessment_type: 'MIDTERM', title: 'Term 3 Midterm' },
+    );
+  }
 
   let assessmentCount = 0;
   let scoreCount = 0;
@@ -540,9 +581,9 @@ function seedAssessmentsAndScores(enteredBy) {
     const createdAt = `${period.from}T06:00:00.000Z`;
     const enteredAt = `${period.to}T09:00:00.000Z`;
     roster.forEach((student, i) => {
-      // Leave selected T2M attendance records empty in the test class.
+      // Leave selected live-point attendance records empty in the test class.
       if (
-        checkpoint.point === 'T2M' &&
+        checkpoint.point === LIVE_POINT &&
         classId === TEST_CLASS.classId &&
         isMissingDemoAttendance(student.student_id)
       ) {
@@ -596,7 +637,7 @@ function seedAssessmentsAndScores(enteredBy) {
         max_score: 100,
         due_date: checkpoint.due_date,
         score_count: roster.length - (
-          checkpoint.point === 'T2M' && classId === TEST_CLASS.classId
+          checkpoint.point === LIVE_POINT && classId === TEST_CLASS.classId
             ? T2M_DEMO_MISSING.scores.filter(
                 (entry) =>
                   entry.subject === subject &&
@@ -643,7 +684,7 @@ function seedAssessmentsAndScores(enteredBy) {
 
         // Leave selected T2M marks empty in the test class.
         if (
-          checkpoint.point === 'T2M' &&
+          checkpoint.point === LIVE_POINT &&
           classId === TEST_CLASS.classId &&
           isMissingDemoScore(studentId, subject)
         ) {
@@ -747,6 +788,13 @@ async function batchWriteAll(allItems) {
 }
 
 async function run() {
+  // This generator resets data/passwords and must never target hosted services.
+  for (const name of ['DDB_ENDPOINT', 'COGNITO_ENDPOINT', 'LAMBDA_ENDPOINT', 'S3_ENDPOINT', 'EVENTS_ENDPOINT', 'SFN_ENDPOINT']) {
+    const endpoint = process.env[name];
+    if (!endpoint || !['localhost', '127.0.0.1', '[::1]'].includes(new URL(endpoint).hostname)) {
+      throw new Error(`Local seed requires loopback ${name}. Use scripts/demo/data.mjs for AWS.`);
+    }
+  }
   progress('Starting database setup...');
   await ensureTable({ reset: process.argv.includes('--reset') });
   progress('Database setup complete.');
@@ -812,6 +860,7 @@ async function run() {
   const riskSummary = await seedPublishedHistory({
     schoolId: SCHOOL, terms: TERMS, classIds: allClassIds, items, staff,
     subjects: MODEL_SUBJECTS, actor: { sub: subs.john, name: 'John Man' },
+    publishedTermNumbers: PUBLISHED_TERM_NUMBERS,
   });
   progress('Historical publication and risk predictions complete.');
 
@@ -824,7 +873,8 @@ async function run() {
   console.log(`  assessments   ${seeded.assessmentCount}`);
   console.log(`  score records ${seeded.scoreCount}`);
   console.log(`  attendance    ${items.filter((i) => i.entity === 'Attendance').length}`);
-  console.log(`  publications  ${allClassIds.length * 2} (with model predictions and SHAP)`);
+  console.log(`  publications  ${allClassIds.length * 2 * PUBLISHED_TERM_NUMBERS.length} (with model predictions and SHAP)`);
+  if (PAST_STUDENTS.length) console.log(`  past students ${PAST_STUDENTS.length}`);
   console.log(`  flagged       ${riskSummary.flagged} (counterfactuals: ${JSON.stringify(riskSummary.counterfactuals)})`);
   console.log(`  interventions ${riskSummary.interventions}`);
 

@@ -5,6 +5,7 @@ const entries = {
   prediction: 'backend/lambdas/risk-prediction/handler.js',
   report: 'backend/lambdas/report-card-worker/handler.js',
   link: 'deploy/aws/link-google.js',
+  authmail: 'backend/lambdas/auth-mail/handler.js',
 };
 mkdirSync('deploy/aws/.build', { recursive: true });
 for (const [name, entry] of Object.entries(entries)) await build({

@@ -844,6 +844,22 @@ td.actions .btn.danger {
   gap: var(--space-2);
 }
 
+.handover-fallback summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  width: fit-content;
+}
+
+.handover-fallback[open] {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.handover-fallback[open] summary {
+  margin-bottom: var(--space-1);
+}
+
 .secret {
   display: inline-block;
   margin-left: var(--space-2);
@@ -4363,11 +4379,4 @@ th .sort:focus-visible {
 
 .ranking {
   min-width: 48rem;
-}
-
-/* ---- Default scale: the whole app at 80%, as browser zoom would show it. ----
-   A page cannot set the browser's own zoom, so CSS zoom scales the layout instead.
-   Viewers' own browser zoom still applies on top of this. Delete this rule to return to 100%. */
-html {
-  zoom: 0.9;
 }

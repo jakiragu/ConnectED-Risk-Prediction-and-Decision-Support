@@ -83,7 +83,7 @@ export default function NewSchoolPage() {
           <h2 id="next-title">What happens next</h2>
           <ol className="steps">
             <li><b>Add the school.</b> That is this page.</li>
-            <li><b>Add its first administrator.</b> You get a temporary password to pass on to them.</li>
+            <li><b>Add its first administrator.</b> We email them a sign-in link and a temporary password.</li>
             <li><b>They sign in</b>, choose their own password and set up classes, terms and teachers.</li>
           </ol>
           <p className="hint">Angaza sees totals for each school, never students’ names, marks or risk estimates.</p>

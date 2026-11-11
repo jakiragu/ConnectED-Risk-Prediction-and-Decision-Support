@@ -92,13 +92,17 @@ function CopyButton({ text, children, primary = false }) {
 }
 
 /**
- * Hands a temporary password over. It is shown once, so everything the new
- * administrator needs is gathered here, ready to paste into a message.
+ * After an administrator is added or their password reset. Normally the details
+ * were emailed, so this confirms it and keeps the password one click away in case
+ * the email does not arrive. If the email could not be sent, it says why and
+ * shows everything to pass on by hand, as before. Either way the password is
+ * shown only here, once.
  */
 export function Handover({ account, schoolName, reset = false, onClose }) {
   const ref = useRef(null);
   useEffect(() => { ref.current?.focus(); }, []);
-  const { admin, temporary_password: password } = account;
+  const { admin, temporary_password: password, email } = account;
+  const emailed = Boolean(email?.sent);
   const name = `${admin.first_name} ${admin.last_name}`;
   const signInAt = `${window.location.origin}/sign-in`;
   const message = [
@@ -109,9 +113,8 @@ export function Handover({ account, schoolName, reset = false, onClose }) {
     'You will choose your own password the first time you sign in.',
   ].join('\n');
 
-  return (
-    <section className="card handover-card" tabIndex={-1} ref={ref} aria-labelledby="handover-title">
-      <h2 id="handover-title">{reset ? `Give ${admin.first_name} their new temporary password` : `Give ${name} their sign-in details`}</h2>
+  const details = (
+    <>
       <dl className="facts">
         <dt>Sign in at</dt><dd>{signInAt}</dd>
         <dt>Email</dt><dd>{admin.email}</dd>
@@ -122,8 +125,38 @@ export function Handover({ account, schoolName, reset = false, onClose }) {
         again, so copy it now. For extra safety, send the password on its own, for example by text message.
       </p>
       <div className="row">
-        <CopyButton text={message} primary>Copy all details</CopyButton>
+        <CopyButton text={message} primary={!emailed}>Copy all details</CopyButton>
         <CopyButton text={password}>Copy password only</CopyButton>
+      </div>
+    </>
+  );
+
+  return (
+    <section className="card handover-card stack" tabIndex={-1} ref={ref} aria-labelledby="handover-title">
+      {emailed ? (
+        <>
+          <h2 id="handover-title">{reset ? `New sign-in details emailed to ${admin.first_name}` : `Invitation emailed to ${name}`}</h2>
+          <p>
+            We sent <b>{admin.email}</b> a sign-in link and a temporary password. {admin.first_name} chooses their own
+            password the first time they sign in.
+          </p>
+          <details className="handover-fallback">
+            <summary>Email not arriving? Show the details to pass on yourself</summary>
+            {details}
+          </details>
+        </>
+      ) : (
+        <>
+          <h2 id="handover-title">{reset ? `Give ${admin.first_name} their new temporary password` : `Give ${name} their sign-in details`}</h2>
+          {email && (
+            <div className="notice warn" role="status">
+              The email to {admin.email} was not sent. {email.problem} Pass these details on yourself.
+            </div>
+          )}
+          {details}
+        </>
+      )}
+      <div className="row">
         <button type="button" className="btn link" onClick={onClose}>Done</button>
       </div>
     </section>

@@ -231,7 +231,7 @@ export const LIST_TEACHERS = `
 
 export const CREATE_TEACHER = `
   mutation CreateTeacher($input: CreateTeacherInput!) {
-    createTeacher(input: $input) { teacher { ${TEACHER_FIELDS} } temporary_password }
+    createTeacher(input: $input) { teacher { ${TEACHER_FIELDS} } temporary_password email { sent problem } }
   }`;
 
 export const UPDATE_TEACHER = `
@@ -258,7 +258,7 @@ export const REACTIVATE_TEACHER = `
 
 export const RESET_TEACHER_PASSWORD = `
   mutation ResetTeacherPassword($input: ResetTeacherPasswordInput!) {
-    resetTeacherPassword(input: $input) { teacher { ${TEACHER_FIELDS} } temporary_password }
+    resetTeacherPassword(input: $input) { teacher { ${TEACHER_FIELDS} } temporary_password email { sent problem } }
   }`;
 
 export const LIST_SCHOOL_CLASSES = `

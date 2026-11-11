@@ -158,7 +158,7 @@ function SetupChecklist({ school, admins, onAddAdmin, onReset }) {
       detail: signedIn || !active.length ? null : waiting.length ? (
         <>
           Waiting for {waiting.map((a) => a.first_name).join(' or ')} to sign in with the temporary password.
-          Lost it? <button type="button" className="btn link" onClick={() => onReset(waiting[0])}>Reset {waiting[0].first_name}’s password</button>
+          Invitation not received? <button type="button" className="btn link" onClick={() => onReset(waiting[0])}>Resend {waiting[0].first_name}’s invitation</button>
         </>
       ) : 'Their sign-in status is not available right now.',
     },
@@ -243,7 +243,9 @@ function AdminsCard({ school, admins, api, open, setOpen, onAdded, onReset }) {
                   <td><SignInState state={a.sign_in} /></td>
                   <td className="actions">
                     {a.status === 'ACTIVE' && (
-                      <button type="button" className="btn link" onClick={() => onReset(a)}>Reset password</button>
+                      <button type="button" className="btn link" onClick={() => onReset(a)}>
+                        {a.sign_in === 'WAITING' ? 'Resend invitation' : 'Reset password'}
+                      </button>
                     )}
                   </td>
                 </tr>
@@ -277,7 +279,7 @@ function AdminsCard({ school, admins, api, open, setOpen, onAdded, onReset }) {
               <button type="button" className="btn secondary" onClick={() => { setOpen(false); setErrors({}); setGeneral(null); }}>Cancel</button>
             )}
           </div>
-          <p className="hint">You get a temporary password to pass on. Nothing is emailed to them.</p>
+          <p className="hint">We email them a sign-in link and a temporary password. If the email cannot be sent, you get the details to pass on.</p>
         </form>
       )}
     </section>
@@ -289,6 +291,7 @@ function ResetDialog({ admin, school, api, onClose, onDone }) {
   const [error, setError] = useState(null);
   useEffect(() => { setError(null); }, [admin]);
   if (!admin) return null;
+  const waiting = admin.sign_in === 'WAITING';
 
   async function reset() {
     setBusy(true);
@@ -304,11 +307,17 @@ function ResetDialog({ admin, school, api, onClose, onDone }) {
   }
 
   return (
-    <Dialog open title={`Reset ${admin.first_name}’s password?`} onClose={onClose} busy={busy} labelId="reset-title">
-      <p>Their current password stops working straight away. You get a temporary password to pass on, and they choose a new one when they sign in.</p>
+    <Dialog open title={waiting ? `Send ${admin.first_name} a new invitation?` : `Reset ${admin.first_name}’s password?`} onClose={onClose} busy={busy} labelId="reset-title">
+      <p>
+        {waiting
+          ? `The temporary password in their earlier invitation stops working. We email ${admin.email} a new one.`
+          : `Their current password stops working straight away. We email ${admin.email} a temporary password, and they choose a new one when they sign in.`}
+      </p>
       {error && <div className="notice error" role="alert">{error}</div>}
       <div className="row">
-        <button type="button" className="btn" onClick={reset} disabled={busy} data-autofocus>{busy ? 'Resetting…' : 'Reset password'}</button>
+        <button type="button" className="btn" onClick={reset} disabled={busy} data-autofocus>
+          {busy ? (waiting ? 'Sending…' : 'Resetting…') : (waiting ? 'Send invitation' : 'Reset password')}
+        </button>
         <button type="button" className="btn secondary" onClick={onClose} disabled={busy}>Cancel</button>
       </div>
     </Dialog>

@@ -11,6 +11,8 @@ import { SUBJECTS } from '../../library/assessment.js';
 import { validation, notFound, conflict } from '../../library/errors.js';
 import { ulid } from '../../library/ids.js';
 import * as identity from '../../library/identity.js';
+import { credentialsEmail } from '../../library/accountEmails.js';
+import { sendEmail } from '../../library/mailer.js';
 import * as platform from '../../library/platformRepo.js';
 import * as school from '../../library/schoolRepo.js';
 import * as classSetupStore from '../../library/classSetupRepo.js';
@@ -220,7 +222,19 @@ async function createTeacher(actor, input) {
     teacher_id: account.sub, email, first_name: first, last_name: last, role, created_by: actor.sub,
   });
   const row = created ? item : await loadTeacher(input.school_id, account.sub);
-  return { teacher: teacherView(row), temporary_password: temporaryPassword };
+  // The account exists now whatever happens to the email; a failed email is reported, not thrown.
+  const delivery = await sendCredentials(actor, row, { created: true, temporaryPassword });
+  return { teacher: teacherView(row), temporary_password: temporaryPassword, email: delivery };
+}
+
+/** Emails sign-in details to a teacher or administrator of the actor's school. */
+async function sendCredentials(actor, teacher, { created = false, stateBefore = null, temporaryPassword }) {
+  const schoolProfile = await platform.school(teacher.school_id || actor.schoolId).catch(() => null);
+  return sendEmail(credentialsEmail({
+    created, stateBefore, temporaryPassword,
+    to: teacher.email, firstName: teacher.first_name, role: teacher.role,
+    schoolName: schoolProfile?.name, actorName: actor.name, portal: 'school',
+  }));
 }
 
 async function updateTeacher(actor, input) {
@@ -345,7 +359,12 @@ async function resetTeacherPassword(actor, input) {
   assertAdmin(actor);
   const existing = await loadTeacher(input.school_id, input.teacher_id);
   if (existing.status !== 'ACTIVE') throw validation('Reactivate this teacher first', 'teacher_id');
-  return { teacher: teacherView(existing), temporary_password: await identity.resetPassword(existing.teacher_id) };
+  // Read before the reset, which puts every account back to WAITING: it decides between
+  // "here is your invitation again" and "your password was reset".
+  const stateBefore = await identity.accountState(existing.teacher_id);
+  const temporaryPassword = await identity.resetPassword(existing.teacher_id);
+  const delivery = await sendCredentials(actor, existing, { stateBefore, temporaryPassword });
+  return { teacher: teacherView(existing), temporary_password: temporaryPassword, email: delivery };
 }
 
 // ----------------------------------------------------------------- classes

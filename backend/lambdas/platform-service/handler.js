@@ -3,6 +3,8 @@ import { resolvePlatformActor } from '../../library/platformActor.js';
 import { conflict, notFound, validation } from '../../library/errors.js';
 import { countryOf, readSchoolPlace } from '../../library/locations.js';
 import * as identity from '../../library/identity.js';
+import { credentialsEmail, schoolStatus } from '../../library/accountEmails.js';
+import { sendEach, sendEmail } from '../../library/mailer.js';
 import * as platform from '../../library/platformRepo.js';
 import * as school from '../../library/schoolRepo.js';
 import * as store from '../../library/platformStore.js';
@@ -165,6 +167,7 @@ async function suspendSchool(actor, input) {
   if (reason.length < 5) throw validation('Say briefly why, so colleagues know when it can be lifted', 'reason');
   if (current.status === 'SUSPENDED') return schoolView(current);
   const reg = await store.setStatus(current, 'SUSPENDED', reason, input._version, actor).catch(storeError(current));
+  await tellAdmins(reg, true);
   return schoolView(reg);
 }
 
@@ -172,7 +175,18 @@ async function reactivateSchool(actor, input) {
   const current = await loadRegistration(input.school_id);
   if (current.status !== 'SUSPENDED') return schoolView(current);
   const reg = await store.setStatus(current, 'ACTIVE', null, input._version, actor).catch(storeError(current));
+  await tellAdmins(reg, false);
   return schoolView(reg);
+}
+
+/**
+ * Tells the school's active administrators that it was paused or resumed, so
+ * they hear it from Angaza rather than from a refused sign-in. The reason stays
+ * with Angaza. A failed email never undoes the change; it is logged by the mailer.
+ */
+async function tellAdmins(reg, suspended) {
+  const admins = (await store.admins(reg.school_id).catch(() => [])).filter((a) => (a.status || 'ACTIVE') === 'ACTIVE' && a.email);
+  await sendEach(admins.map((a) => schoolStatus({ to: a.email, firstName: a.first_name, schoolName: reg.name, suspended })));
 }
 
 // ------------------------------------------------------------ administrators
@@ -202,12 +216,16 @@ async function addSchoolAdmin(actor, input) {
     teacher_id: account.sub, email, first_name: first, last_name: last, role: 'Admin', created_by: actor.sub, created_by_angaza: true,
   });
   const row = created ? item : await platform.teacher(reg.school_id, account.sub);
-  await store.audit(reg.school_id, 'ADMIN_ADDED', actor, { teacher_id: account.sub, email });
-  return { admin: adminView(row, 'WAITING'), temporary_password: temporaryPassword };
+  // The account exists now whatever happens to the email; a failed email is reported, not thrown.
+  const delivery = await sendEmail(credentialsEmail({
+    created: true, temporaryPassword, to: email, firstName: first, role: 'Admin', schoolName: reg.name, actorName: actor.name,
+  }));
+  await store.audit(reg.school_id, 'ADMIN_ADDED', actor, { teacher_id: account.sub, email, emailed: delivery.sent });
+  return { admin: adminView(row, 'WAITING'), temporary_password: temporaryPassword, email: delivery };
 }
 
 async function resetSchoolAdminPassword(actor, input) {
-  await loadRegistration(input.school_id);
+  const reg = await loadRegistration(input.school_id);
   const row = await platform.teacher(input.school_id, input.teacher_id);
   if (!row || row.role !== 'Admin') {
     throw validation('Angaza resets administrators’ passwords only. Teachers ask their school administrator.', 'teacher_id');
@@ -215,7 +233,14 @@ async function resetSchoolAdminPassword(actor, input) {
   if ((row.status || 'ACTIVE') !== 'ACTIVE') {
     throw validation(`${fullName(row)}’s account was deactivated by the school. Another administrator there can reactivate it.`, 'teacher_id');
   }
+  // Read before the reset, which puts every account back to WAITING: it decides between
+  // "here is your invitation again" and "your password was reset".
+  const stateBefore = await identity.accountState(row.teacher_id);
   const temporaryPassword = await identity.resetPassword(row.teacher_id);
-  await store.audit(input.school_id, 'ADMIN_PASSWORD_RESET', actor, { teacher_id: row.teacher_id });
-  return { admin: adminView(row, 'WAITING'), temporary_password: temporaryPassword };
+  const delivery = await sendEmail(credentialsEmail({
+    stateBefore, temporaryPassword, to: row.email, firstName: row.first_name, role: 'Admin', schoolName: reg.name, actorName: actor.name,
+  }));
+  await store.audit(input.school_id, stateBefore === 'WAITING' ? 'ADMIN_INVITATION_RESENT' : 'ADMIN_PASSWORD_RESET', actor,
+    { teacher_id: row.teacher_id, emailed: delivery.sent });
+  return { admin: adminView(row, 'WAITING'), temporary_password: temporaryPassword, email: delivery };
 }

@@ -1,9 +1,11 @@
 import { CognitoIdentityProviderClient, ListUsersCommand, AdminListGroupsForUserCommand, AdminLinkProviderForUserCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { googleLinked } from '../../backend/library/accountEmails.js';
+import { sendEmail } from '../../backend/library/mailer.js';
 const client = new CognitoIdentityProviderClient({});
 const GMAIL = ['gmail.com', 'googlemail.com'];
 // Case-insensitive pools (CaseSensitive: false) hand the trigger a lower-case federated username: "google_<id>".
 const isGoogleName = name => /^google_/i.test(String(name || ''));
-export const makeHandler = (send = command => client.send(command)) => async event => {
+export const makeHandler = (send = command => client.send(command), notify = sendEmail) => async event => {
   if (event.triggerSource === 'PreSignUp_AdminCreateUser') return event;
   const attrs = event.request?.userAttributes || {};
   const email = String(attrs.email || '').toLowerCase();
@@ -34,6 +36,13 @@ export const makeHandler = (send = command => client.send(command)) => async eve
     DestinationUser: { ProviderName: 'Cognito', ProviderAttributeValue: user.Username },
     // The provider is always named "Google" in the pool, whatever case the username arrived in.
     SourceUser: { ProviderName: 'Google', ProviderAttributeName: 'Cognito_Subject', ProviderAttributeValue: String(event.userName).slice('google_'.length) } }));
+  // A new way into the account: tell its owner. Sign-in must not wait on or fail with the email.
+  try {
+    const name = user.Attributes.find(a => a.Name === 'name')?.Value || '';
+    await notify(googleLinked({ to: email, firstName: name.split(' ')[0], portal: schoolId ? 'school' : 'angaza' }));
+  } catch (error) {
+    console.log(JSON.stringify({ notice: 'google-linked-email-failed', error: error?.name }));
+  }
   return event;
 };
 export const handler = makeHandler();

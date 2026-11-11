@@ -37,9 +37,9 @@ export const REACTIVATE_SCHOOL = `mutation ReactivateSchool($input: SchoolRefInp
 }`;
 
 export const ADD_SCHOOL_ADMIN = `mutation AddSchoolAdmin($input: AddSchoolAdminInput!) {
-  addSchoolAdmin(input: $input) { admin { ${ADMIN_FIELDS} } temporary_password }
+  addSchoolAdmin(input: $input) { admin { ${ADMIN_FIELDS} } temporary_password email { sent problem } }
 }`;
 
 export const RESET_SCHOOL_ADMIN_PASSWORD = `mutation ResetSchoolAdminPassword($input: ResetSchoolAdminPasswordInput!) {
-  resetSchoolAdminPassword(input: $input) { admin { ${ADMIN_FIELDS} } temporary_password }
+  resetSchoolAdminPassword(input: $input) { admin { ${ADMIN_FIELDS} } temporary_password email { sent problem } }
 }`;

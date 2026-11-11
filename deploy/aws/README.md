@@ -165,9 +165,62 @@ School portal: click Forgot password → enter verified account email → retrie
 
 Angaza portal: click Forgot password → Cognito-hosted recovery page → enter email/code/new password → use the hosted login or return to `SiteUrl/angaza/sign-in`. This route is wired to the Angaza pool, not the school pool.
 
-The default Cognito sender is `no-reply@verificationemail.com`. Check spam. The default sending quota is 50 messages per day per AWS account, shared across pools. SES/custom email setup is a later step for a wider rollout, not needed for a few live tests. Google itself does not send these reset emails.
+Until the mail phase below has run, the reset code comes from Cognito's default sender, `no-reply@verificationemail.com` (check spam; about 50 messages per day per account, shared across pools). Google itself does not send these reset emails.
 
 Remember me was already implemented: checked uses localStorage; unchecked uses sessionStorage. The new OAuth flow preserves that choice. Both portals retain separate keys. Browser session restoration can sometimes restore sessionStorage tabs; this is not a strong shared-computer security boundary. Sign out explicitly on shared devices. App logout clears the app's session; it does not sign the person out of their Google account or implement global token revocation.
+
+## Account emails (SES)
+
+ConnectED emails people when their account changes:
+
+| When | Email | Sent by |
+|---|---|---|
+| Angaza adds a school administrator; an administrator adds a teacher; `deploy.py staff` | Invitation with sign-in link and temporary password | API / staff script, through SES |
+| Reset for someone who never signed in | The invitation again, with a new temporary password | API |
+| Reset for someone who has signed in | "Your password was reset", with a temporary password | API |
+| Forgot password | Reset code in ConnectED's wording | Cognito (wording from the `auth-mail` trigger) |
+| Forgot-password reset finished | "Your password was changed" | `auth-mail` trigger |
+| Google linked to an account | "Google sign-in was added" | `google-link` trigger |
+| School suspended or reactivated | Notice to its active administrators (never Angaza's reason) | API |
+
+A failed email never undoes the account change. The app shows the administrator the temporary password and why the email failed, so they can pass it on themselves. Until a sender is set up, nothing is emailed and every handover works that way.
+
+### Turning it on
+
+1. Run `python deploy/aws/deploy.py deploy` once with this version of the code. It uploads the `auth-mail` function; the mail phase refuses to run before this.
+2. Choose a sender address you can receive mail at (later, an address on your own domain: mail from a domain you control is far less likely to land in spam).
+3. Run:
+
+   ```powershell
+   python deploy/aws/deploy.py mail --sender "no-reply@yourdomain.org"
+   ```
+
+   It asks SES to verify the address, waits until you click the link in the verification email, checks whether SES is in its sandbox, then updates the stack: both user pools send through SES from that address and the Lambdas get permission to send.
+
+   The first update makes Cognito create a service-linked role for SES. Your deploying identity needs `iam:CreateServiceLinkedRole`; an administrator profile has it.
+
+4. Later `deploy` runs keep the sender.
+
+### The SES sandbox
+
+A new SES account can send only to addresses that are themselves verified, at most 200 emails a day. The mail phase says when this applies. For a live test, verify each test recipient:
+
+```powershell
+aws sesv2 create-email-identity --email-identity person@example.org --region eu-west-1
+```
+
+For real schools, request production access: SES console, Account dashboard, Request production access. Describe the mail honestly: transactional account emails (invitations, password resets, security notices) to staff added by an administrator; no marketing. Until it is granted, emails to unverified people fail and the app falls back to showing the password.
+
+### Checks
+
+- Add a teacher with a verified address: the invitation arrives, the link opens `/sign-in`, the temporary password works once.
+- Reset them before and after their first sign-in: "invitation" the first time, "password was reset" the second.
+- Forgot password in each portal: the code arrives in ConnectED's wording; after the reset a "password was changed" email follows.
+- Link Google: "Google sign-in was added" arrives.
+- Suspend and reactivate a test school: its administrators get both notices.
+- Logs: `/aws/lambda/connected-demo-api` and `-auth-mail` show `svc: mailer` lines with `sent: true`. They never contain recipient addresses.
+
+Locally nothing is sent: each email is printed in the `npm run api` terminal and saved under `local/.data/mail` (open the `.html` files in a browser).
 
 ## 140–180 minutes: live acceptance checks
 
@@ -208,6 +261,7 @@ This design avoids EC2, NAT gateways, load balancers, custom domains and always-
 | Google `redirect_uri_mismatch` | In Google Console use the Cognito `/oauth2/idpresponse` URLs, not the app callbacks. Exact spelling/region matters. |
 | Google says invite/password first | Complete native temporary-password login and verify the invited email matches Google. |
 | `InvalidParameterException` during linking | Confirm you used the newly provisioned pool with mutable custom attributes, not an older pool with immutable school_id. |
+| No email arrives | Check spam; check SES sandbox (recipient verified?) and the `svc: mailer` log line for the reason. |
 | No recovery email | Check spam, verified email, enabled user, correct pool/client and daily sending quota. |
 | Blank/unauthorized page | Re-run `web`, clear old local app sessions, inspect browser network API endpoint and token issuer. |
 | Report PDF denied | Check results publication, state-machine execution, report-worker logs and the app's fresh presigned URL. |

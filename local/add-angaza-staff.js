@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import * as platformIdentity from '../backend/library/platformIdentity.js';
 import { putStaff, staff } from '../backend/library/platformStore.js';
+import { invitation } from '../backend/library/accountEmails.js';
+import { sendEmail } from '../backend/library/mailer.js';
 
 /**
  * Gives an Angaza colleague access to the Angaza console. The console never
@@ -8,7 +10,8 @@ import { putStaff, staff } from '../backend/library/platformStore.js';
  *
  *   npm run angaza:add-staff -- --email jane@angazacenter.org --first Jane --last Wanjiru
  *
- * Prints a temporary password once; they choose their own at first sign-in.
+ * Emails them a temporary password (and prints it once, in case the email does
+ * not arrive); they choose their own at first sign-in.
  */
 const arg = (name) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -27,6 +30,13 @@ const account = await platformIdentity.createStaffAccount({ email, name: `${firs
 if (!(await staff(account.sub))) {
   await putStaff({ staff_id: account.sub, email, first_name: first, last_name: last });
 }
-console.log(account.created
-  ? `Added ${first} ${last} (${email}). Temporary password: ${account.temporaryPassword}\nThey choose their own password the first time they sign in at /angaza.`
-  : `${email} already had an Angaza account; it can use the console now.`);
+if (!account.created) {
+  console.log(`${email} already had an Angaza account; it can use the console now.`);
+} else {
+  const delivery = await sendEmail(invitation({ to: email, firstName: first, temporaryPassword: account.temporaryPassword, role: 'PlatformAdmin', portal: 'angaza' }));
+  console.log(`Added ${first} ${last} (${email}). Temporary password: ${account.temporaryPassword}`);
+  console.log(delivery.sent
+    ? 'Their invitation was emailed to them. The password above is only for if it does not arrive.'
+    : `The invitation was not emailed (${delivery.problem}) Give them the password yourself.`);
+  console.log('They choose their own password the first time they sign in at /angaza.');
+}

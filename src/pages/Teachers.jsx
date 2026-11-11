@@ -22,16 +22,36 @@ const ROLES = ['Teacher', 'Admin'];
 const EMPTY = { first_name: '', last_name: '', email: '', role: 'Teacher' };
 const fullName = (t) => `${t.first_name} ${t.last_name}`;
 
-/** Shows a temporary password once, with the account it belongs to. */
+/**
+ * After a teacher is added or their password reset. Normally the details were
+ * emailed, so this confirms it and keeps the temporary password one click away
+ * in case the email does not arrive. If it could not be sent, it says why and
+ * shows the password to hand over, as before. It is shown only here, once.
+ */
 function Handover({ account, onClose }) {
   if (!account) return null;
+  const { teacher, temporary_password: password, email } = account;
+  const secret = <code className="secret">{password}</code>;
   return (
-    <div className="notice handover">
-      <div>
-        Give <b>{fullName(account.teacher)}</b> ({account.teacher.email}) this temporary password:
-        <code className="secret">{account.temporary_password}</code>
-      </div>
-      <div className="hint">They choose their own password the first time they log in. It is not shown again.</div>
+    <div className="notice handover" role="status">
+      {email?.sent ? (
+        <>
+          <div>
+            Sign-in details emailed to <b>{fullName(teacher)}</b> ({teacher.email}). They choose their own password the first time they log in.
+          </div>
+          <details className="handover-fallback">
+            <summary>Email not arriving? Show the temporary password</summary>
+            <div>Temporary password: {secret}</div>
+            <div className="hint">It is not shown again.</div>
+          </details>
+        </>
+      ) : (
+        <>
+          {email && <div className="warn">The email to {teacher.email} was not sent. {email.problem}</div>}
+          <div>Give <b>{fullName(teacher)}</b> ({teacher.email}) this temporary password: {secret}</div>
+          <div className="hint">They choose their own password the first time they log in. It is not shown again.</div>
+        </>
+      )}
       <button type="button" className="btn link" onClick={onClose}>Done</button>
     </div>
   );
@@ -259,7 +279,7 @@ export default function Teachers() {
           </Field>
           <button className="btn" type="submit" disabled={busy}>Add teacher</button>
         </div>
-        <div className="hint">This creates their sign-in account and gives you a temporary password to hand over.</div>
+        <div className="hint">This creates their sign-in account and emails them a sign-in link and a temporary password.</div>
       </form>
 
       <div className="table-wrap">

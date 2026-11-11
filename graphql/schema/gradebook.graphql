@@ -127,6 +127,13 @@ type Teacher {
 type TeacherAccount {
   teacher: Teacher!
   temporary_password: String      # shown once; the teacher chooses their own at first sign-in
+  email: EmailDelivery            # whether the sign-in details were emailed to them
+}
+
+# What happened to an account email. The account change has already happened either way.
+type EmailDelivery {
+  sent: Boolean!
+  problem: String                 # why it was not sent, in words the administrator can act on
 }
 
 type ReportCardEntry {
@@ -1725,6 +1732,7 @@ type PlatformSchoolDetail {
 type SchoolAdminAccount {
   admin: SchoolAdmin!
   temporary_password: String       # shown once; the administrator chooses their own at first sign-in
+  email: EmailDelivery             # whether the sign-in details were emailed to them
 }
 
 input CreateSchoolInput {

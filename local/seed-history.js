@@ -63,7 +63,7 @@ function interventionActor(staff, classId, subject, admin) {
 }
 
 /** Seed-only orchestration; calculations, publication guards and ML use production code. */
-export async function seedPublishedHistory({ schoolId, terms, classIds, items, staff, subjects, actor }) {
+export async function seedPublishedHistory({ schoolId, terms, classIds, items, staff, subjects, actor, publishedTermNumbers = [1] }) {
   const summary = { flagged: 0, interventions: 0, counterfactuals: {} };
   const interventionPredictions = [];
   const diceFoundByClass = new Map(classIds.map((c) => [c, 0]));
@@ -77,7 +77,7 @@ export async function seedPublishedHistory({ schoolId, terms, classIds, items, s
   }
 
   for (const term of terms) {
-    if (term.term_number !== 1) continue;
+    if (!publishedTermNumbers.includes(term.term_number)) continue;
     
     for (const checkpoint of ['MIDTERM', 'ENDTERM']) {
       // T3F is the outcome, not a prediction checkpoint. Leave it available for demos.
@@ -92,7 +92,8 @@ export async function seedPublishedHistory({ schoolId, terms, classIds, items, s
         const classStartedAt = Date.now();
         progress(`Starting ${classId} ${point}...`);
         const scope = { termId: term.term_id, classId, checkpoint };
-        const roster = items.filter((i) => i.entity === 'Student' && i.class_id === classId);
+        // Active students only, like the live roster: past students have no marks to calculate.
+        const roster = items.filter((i) => i.entity === 'Student' && i.class_id === classId && (i.status || 'ACTIVE') === 'ACTIVE');
         const live = await assessments.listAllLive(schoolId, classId, term.term_id);
         const previous = checkpoint === 'ENDTERM'
           ? await results.getSet(schoolId, { ...scope, checkpoint: 'MIDTERM' }) : null;

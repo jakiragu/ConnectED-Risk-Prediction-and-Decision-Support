@@ -44,3 +44,27 @@ test('a non-Google federated sign-up is refused', async () => {
   const e = event(); e.userName = 'facebook_1';
   await assert.rejects(mock().handler(e), /administrator/);
 });
+test('linking emails the account owner, in the right portal, without the Google ID', async () => {
+  const sent = [];
+  const u = user(); u.Attributes.push({ Name: 'name', Value: 'Mary Wanjiku' });
+  const handler = makeHandler(async command => command.constructor.name === 'ListUsersCommand' ? { Users: [u] }
+    : command.constructor.name === 'AdminListGroupsForUserCommand' ? { Groups: [{ GroupName: 'Teacher' }] } : {}, async m => { sent.push(m); return { sent: true }; });
+  await handler(event());
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'teacher@gmail.com');
+  assert.equal(sent[0].kind, 'google-linked');
+  assert.match(sent[0].text, /Hello Mary,/);
+  assert.match(sent[0].text, /\/sign-in/);
+  assert.doesNotMatch(sent[0].text, /12345/);
+});
+test('a failing email never blocks the Google sign-in', async () => {
+  const handler = makeHandler(async command => command.constructor.name === 'ListUsersCommand' ? { Users: [user()] }
+    : command.constructor.name === 'AdminListGroupsForUserCommand' ? { Groups: [{ GroupName: 'Teacher' }] } : {}, async () => { throw new Error('SES down'); });
+  const e = event(); assert.equal(await handler(e), e);
+});
+test('refused sign-ins send no email', async () => {
+  const sent = [];
+  const handler = makeHandler(async command => command.constructor.name === 'ListUsersCommand' ? { Users: [] } : {}, async m => { sent.push(m); });
+  await assert.rejects(handler(event()));
+  assert.equal(sent.length, 0);
+});
