@@ -20,6 +20,8 @@
     "./grading": "./grading.js",
     "./classProfile": "./classProfile.js",
     "./classSetup": "./classSetup.js",
-    "./locations": "./locations.js"
+    "./locations": "./locations.js",
+    "./student": "./student.js",
+    "./csvImport": "./csvImport.js"
   }
 }

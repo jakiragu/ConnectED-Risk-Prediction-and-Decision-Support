@@ -52,6 +52,7 @@ import {
 import { riskScope, checkpointPoint } from '../../library/decisionSupport.js';
 import { attendancePeriods } from '../../library/calendar.js';
 import { periodSummary } from '../../library/attendance.js';
+import { previewResultsSms, sendResultsSms, smsColumns } from './sms.js';
 
 export async function handler(event) {
   const actor = await resolveActor(event);
@@ -93,6 +94,10 @@ export async function handler(event) {
       return listReportCards(actor, args);
     case 'requestReportCardDownload':
       return requestReportCardDownload(actor, input);
+    case 'previewResultsSms':
+      return previewResultsSms(actor, args);
+    case 'sendResultsSms':
+      return sendResultsSms(actor, input);
     default:
       throw notFound(`No handler for ${event.info.fieldName}`);
   }
@@ -581,6 +586,7 @@ async function listReportCards(actor, args) {
   const byStudent = new Map(cards.map((c) => [c.student_id, c]));
 
   const students = await Promise.all((set.student_ids || []).map((id) => platform.student(args.school_id, id)));
+  const sms = await smsColumns(args.school_id, set);
   return students.filter(Boolean)
     .sort((a, b) => String(a.admission_no).localeCompare(String(b.admission_no), undefined, { numeric: true }))
     .map((st) => {
@@ -595,6 +601,7 @@ async function listReportCards(actor, args) {
         kind: card?.kind ?? null,
         available: Boolean(card),
         generated_at: card?.generated_at ?? null,
+        ...sms(st),
       };
     });
 }

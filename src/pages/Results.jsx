@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { SEVERITY } from '@gradebook/domain/results';
 import { componentLabel } from '@gradebook/domain/assessment';
 import { gql } from '../api/graphql.js';
@@ -431,8 +431,12 @@ export default function Results() {
       ? '\n\nThis is the official end of term result. The term is locked for this class afterwards.'
       : '';
     if (!window.confirm(`Publish ${label} results for ${className}? Marks for these papers are locked.${finalNote}`)) return;
-    act(PUBLISH_RESULTS, { ...scope, _version: set._version }, (s) =>
-      `Published. Report cards: ${s.report_cards_generated} of ${s.report_cards_expected} produced so far.`);
+    act(PUBLISH_RESULTS, { ...scope, _version: set._version }, (s) => (
+      <>
+        {`Published. Report cards: ${s.report_cards_generated} of ${s.report_cards_expected} produced so far. `}
+        <Link to={`/report-cards?term=${termId}&cp=${checkpoint}&class=${classId}`}>Text parents from Report cards</Link>
+      </>
+    ));
   }
 
   const className = classes.find((c) => c.class_id === classId)?.name || '';

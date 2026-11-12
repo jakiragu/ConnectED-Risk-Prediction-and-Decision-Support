@@ -18,7 +18,7 @@ def run(args, *, capture=False, env=None, input=None):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('phase',choices=['check','deploy','google','mail','web','model','staff','outputs'])
+    p.add_argument('phase',choices=['check','deploy','google','mail','sms','web','model','staff','outputs'])
     p.add_argument('--region',default='eu-west-1');p.add_argument('--stack',default='connected-demo')
     p.add_argument('--email');p.add_argument('--first');p.add_argument('--last')
     p.add_argument('--sender',help='mail phase: the address ConnectED emails come from, e.g. no-reply@yourdomain.org')
@@ -53,8 +53,14 @@ def main():
         return {**env,**values,'DOTENV_CONFIG_PATH':str(path)}
     def web(o):
         run(['npm','run','build','--workspace','@connected/web','--','--mode','aws'],env=appenv(o))
-        aws('s3','sync',str(ROOT/'frontend/react-app/dist'),f"s3://{o['WebBucket']}/",'--exclude','index.html','--cache-control','public,max-age=31536000,immutable',capture=False)
-        aws('s3','cp',str(ROOT/'frontend/react-app/dist/index.html'),f"s3://{o['WebBucket']}/index.html",'--cache-control','no-cache,no-store,must-revalidate','--content-type','text/html',capture=False)
+        dist=ROOT/'frontend/react-app/dist'
+        # Files with fixed names must always be fetched fresh, or devices keep an old app; hashed files never change.
+        fresh=['index.html','sw.js','registerSW.js']
+        aws('s3','sync',str(dist),f"s3://{o['WebBucket']}/",*[x for f in fresh for x in ('--exclude',f)],'--cache-control','public,max-age=31536000,immutable',capture=False)
+        aws('s3','cp',str(dist/'index.html'),f"s3://{o['WebBucket']}/index.html",'--cache-control','no-cache,no-store,must-revalidate','--content-type','text/html',capture=False)
+        for f in ['sw.js','registerSW.js']:
+            if (dist/f).exists():
+                aws('s3','cp',str(dist/f),f"s3://{o['WebBucket']}/{f}",'--cache-control','no-cache,no-store,must-revalidate','--content-type','application/javascript',capture=False)
         aws('cloudfront','create-invalidation','--distribution-id',o['DistributionId'],'--paths','/*',capture=False)
     if a.phase=='check':
         for command in [['aws','--version'],['node','--version'],['npm','--version'],['docker','version']]: run(command,env=env)
@@ -117,7 +123,7 @@ def main():
             print('  For real use, request production access: SES console -> Account dashboard -> Request production access.')
             print('  Until then, emails to unverified people fail and the app shows their temporary password instead.\n')
         state['mail_from']=sender;save()
-    if a.phase in ['deploy','google','mail']:
+    if a.phase in ['deploy','google','mail','sms']:
         if not all(k in state for k in ['artifact_bucket','code_key','image']): raise RuntimeError('Run deploy first in this same folder/account/region.')
         template=BUILD/'template.json';template.write_text(json.dumps(make_template(),indent=2))
         params=[{'ParameterKey':k,'ParameterValue':v} for k,v in {'ArtifactBucket':state['artifact_bucket'],'CodeKey':state['code_key'],'ScorerImage':state['image']}.items()]
@@ -129,6 +135,15 @@ def main():
             client_id=input('Google OAuth client ID: ').strip();secret=getpass.getpass('Google OAuth client secret (hidden): ').strip()
             if not client_id.endswith('.apps.googleusercontent.com') or not secret: raise RuntimeError('Missing or invalid Google OAuth credentials.')
             params.extend([{'ParameterKey':'GoogleClientId','ParameterValue':client_id},{'ParameterKey':'GoogleClientSecret','ParameterValue':secret}])
+        if a.phase=='sms':
+            print("Africa's Talking: use username 'sandbox' and the sandbox app's API key to test with their simulator,")
+            print('or your live app username and key to reach real phones (the account needs credit).')
+            username=input("Africa's Talking username [sandbox]: ").strip() or 'sandbox'
+            key=getpass.getpass("Africa's Talking API key (hidden): ").strip()
+            sender='' if username=='sandbox' else input('Approved sender ID (Enter for the shared default): ').strip()
+            if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',username) or not key: raise RuntimeError("Missing or invalid Africa's Talking username or API key.")
+            params.extend([{'ParameterKey':'AtUsername','ParameterValue':username},{'ParameterKey':'AtApiKey','ParameterValue':key},
+                {'ParameterKey':'AtSenderId','ParameterValue':sender}])
         # cloudformation deploy automatically preserves existing values for omitted parameters.
         # The secret is a NoEcho CFN parameter in a temporary file, never a process argument or saved config.
         fd,temp=tempfile.mkstemp(suffix='.json')
@@ -138,6 +153,7 @@ def main():
                 '--capabilities','CAPABILITY_IAM','--parameter-overrides','file://'+temp,'--no-fail-on-empty-changeset',capture=False)
         finally: Path(temp).unlink(missing_ok=True)
         if a.phase=='google': state['google_enabled']=True;save()
+        if a.phase=='sms': state['sms_username']=username;save()
         if a.phase=='deploy': state['authmail_built']=True;save()
         o=outputs();appenv(o)
         if a.phase=='deploy':

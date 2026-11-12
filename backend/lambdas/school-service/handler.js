@@ -3,6 +3,8 @@ import {
   assertAdmin,
   assertClassRead,
   assertClassTeacherOrAdmin,
+  isAdmin,
+  isClassTeacherOf,
   ROLE,
   ROLES,
 } from '../../library/authz.js';
@@ -18,6 +20,7 @@ import * as school from '../../library/schoolRepo.js';
 import * as classSetupStore from '../../library/classSetupRepo.js';
 import { normaliseSetup, setupFromClasses, classFieldProblem, canonicalClassFields } from '../../library/classSetup.js';
 import { STUDENT_STATUS } from '../../library/promotion.js';
+import { ADMISSION, GUARDIAN_NAME_MAX, normalisePhone } from '../../library/student.js';
 import {
   applyPromotion, getPromotionRun, listPastStudents, listPromotionRuns, planPromotion, revertPromotion,
 } from './promotion.js';
@@ -90,7 +93,6 @@ export async function handler(event) {
 
 const STALE = 'Someone else changed this record. Reload and try again.';
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const ADMISSION = /^[A-Za-z0-9/-]{1,20}$/;
 const CLASS_STATUS = ['CURRENT', 'PAST'];
 
 const clean = (s) => (typeof s === 'string' ? s.trim() : s);
@@ -139,7 +141,17 @@ const classView = (c, extra = {}) => ({
   ...extra,
 });
 
-const studentView = (s) => ({
+/**
+ * Guardian contacts are personal data about someone other than the student, so
+ * only the people who manage the class (an administrator, its class teacher)
+ * see them. Subject teachers get the record without them.
+ */
+const seesContacts = (actor, s) => Boolean(actor) && (isAdmin(actor) || isClassTeacherOf(actor, s.class_id));
+
+const studentView = (s, actor) => ({
+  ...(seesContacts(actor, s)
+    ? { guardian_name: s.guardian_name ?? null, guardian_phone: s.guardian_phone ?? null, results_sms: s.results_sms !== false }
+    : { guardian_name: null, guardian_phone: null, results_sms: null }),
   student_id: s.student_id,
   school_id: s.school_id,
   first_name: s.first_name,
@@ -502,7 +514,7 @@ async function deleteClass(actor, input) {
 async function listStudents(actor, { school_id, class_id, include_inactive }) {
   await loadClass(school_id, class_id);
   assertClassRead(actor, class_id);
-  return (await platform.listStudents(school_id, class_id, { includeInactive: Boolean(include_inactive) })).map(studentView);
+  return (await platform.listStudents(school_id, class_id, { includeInactive: Boolean(include_inactive) })).map((s) => studentView(s, actor));
 }
 
 function readStudentFields(input, { partial = false } = {}) {
@@ -514,6 +526,20 @@ function readStudentFields(input, { partial = false } = {}) {
     if (!ADMISSION.test(no)) throw validation('Admission numbers use letters, digits, / and - only', 'admission_no');
     out.admission_no = no;
   }
+  // Guardian contact: optional. An empty value clears it; leaving a field out of an update keeps it.
+  if (!partial || input.guardian_name !== undefined) {
+    const name = String(input.guardian_name ?? '').trim();
+    if (name.length > GUARDIAN_NAME_MAX) throw validation('The guardian name is too long', 'guardian_name');
+    out.guardian_name = name || null;
+  }
+  if (!partial || input.guardian_phone !== undefined) {
+    try {
+      out.guardian_phone = normalisePhone(input.guardian_phone);
+    } catch (e) {
+      throw validation(e.message, 'guardian_phone');
+    }
+  }
+  if (!partial || input.results_sms != null) out.results_sms = input.results_sms !== false;
   return out;
 }
 
@@ -535,7 +561,7 @@ async function createStudent(actor, input) {
     const item = await school.createStudent(input.school_id, {
       student_id: `stu_${ulid().toLowerCase()}`, class_id: input.class_id, ...fields,
     }, actor);
-    return studentView(item);
+    return studentView(item, actor);
   } catch (e) {
     if (e.name !== 'TransactionCanceledException') throw e;
     if (school.reasonAt(e, 1)) throw await admissionTaken(input.school_id, fields.admission_no);
@@ -556,7 +582,7 @@ async function updateStudent(actor, input) {
     if (school.reasonAt(e, 2)) throw await admissionTaken(input.school_id, patch.admission_no);
     throw e;
   }
-  return studentView(await loadStudent(input.school_id, input.student_id));
+  return studentView(await loadStudent(input.school_id, input.student_id), actor);
 }
 
 /**
@@ -579,7 +605,7 @@ async function transferStudent(actor, input) {
     if (school.reasonAt(e, 1)) throw validation(`${destination.name} is archived or was removed`, 'to_class_id');
     throw e;
   }
-  return studentView(await loadStudent(input.school_id, input.student_id));
+  return studentView(await loadStudent(input.school_id, input.student_id), actor);
 }
 
 /** Deactivate, never delete: marks, results and report cards refer to the student. */
@@ -596,7 +622,7 @@ async function setStudentStatus(actor, input) {
       throw validation(`${klass.name}${klass.year ? ` ${klass.year}` : ''} is archived. Move the student to a current class first.`, 'status');
     }
   }
-  if (existing.status === input.status) return studentView(existing);
+  if (existing.status === input.status) return studentView(existing, actor);
   const metadata = {};
   if (input.status === 'INACTIVE') {
     if (!['LEFT', 'TEMPORARY'].includes(input.departure_kind)) throw validation('Choose permanently left or temporarily deactivated', 'departure_kind');
@@ -605,5 +631,5 @@ async function setStudentStatus(actor, input) {
     Object.assign(metadata, { departure_kind: input.departure_kind, deactivation_reason: input.deactivation_reason.trim().slice(0, 500), deactivation_date: input.deactivation_date, left_year: Number(input.deactivation_date.slice(0, 4)) });
   }
   const updated = await school.setStudentStatus(input.school_id, input.student_id, input.status, input._version, actor, metadata).catch(staleOr);
-  return studentView(updated);
+  return studentView(updated, actor);
 }

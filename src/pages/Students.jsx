@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { gql } from '../api/graphql.js';
 import { CREATE_STUDENT, LIST_STUDENTS, SET_STUDENT_STATUS, TRANSFER_STUDENT, UPDATE_STUDENT } from '../api/operations.js';
 import { useAuth } from '../auth/AuthContext.jsx';
@@ -11,15 +11,27 @@ import { useSync } from '../offline/useSync.js';
 import { DangerButton, ActionIcon } from '../components/ui.jsx';
 import { loadStudentRisk } from '../api/studentRisk.js';
 import { classLabel, isCurrent, sortClasses } from '../classLabels.js';
+import { displayPhone } from '@gradebook/domain/student';
 
 const statusText = (s) => (s.status === 'ACTIVE' ? 'Active'
   : s.status === 'GRADUATED' ? `Graduated${s.graduation_year ? ` ${s.graduation_year}` : ''}`
   : s.departure_kind === 'TEMPORARY' ? 'Temporarily deactivated' : s.left_year ? `Left ${s.left_year}` : 'Deactivated');
 
-const EMPTY = { first_name: '', last_name: '', admission_no: '' };
+const EMPTY = { first_name: '', last_name: '', admission_no: '', guardian_name: '', guardian_phone: '' };
+
+/** The edit row's starting values: the phone as people write it locally. */
+const draftOf = (s) => ({
+  first_name: s.first_name,
+  last_name: s.last_name,
+  admission_no: s.admission_no,
+  guardian_name: s.guardian_name || '',
+  guardian_phone: displayPhone(s.guardian_phone),
+  results_sms: s.results_sms !== false,
+});
 
 export default function Students() {
   const { classId } = useParams();
+  const [params, setParams] = useSearchParams();
   const { actor, isAdmin } = useAuth();
   const { online } = useSync();
   const classes = useLive(() => db().classes.toArray(), [], []);
@@ -52,6 +64,19 @@ export default function Students() {
   useEffect(() => {
     if (online) load().catch((e) => setError(e.message));
   }, [load, online]);
+
+  // ?edit=<student_id> (the Add link on Report cards) opens that student's row for editing.
+  const editParam = params.get('edit');
+  useEffect(() => {
+    if (!editParam || !students.length) return;
+    const s = students.find((x) => x.student_id === editParam);
+    if (s && s.status !== 'GRADUATED') {
+      setEditing(s.student_id);
+      setDraft(draftOf(s));
+      setTimeout(() => document.getElementById(`guardian-phone-${s.student_id}`)?.focus(), 0);
+    }
+    setParams((p) => { p.delete('edit'); return p; }, { replace: true });
+  }, [editParam, students, setParams]);
 
   // Risk is optional enrichment: a denied or failed request never hides the roster.
   useEffect(() => {
@@ -139,6 +164,13 @@ export default function Students() {
             <Field label="Admission no" htmlFor="s-adm">
               <input id="s-adm" value={form.admission_no} onChange={(e) => setForm({ ...form, admission_no: e.target.value })} required />
             </Field>
+            <Field label="Parent or guardian" htmlFor="s-guardian">
+              <input id="s-guardian" value={form.guardian_name} onChange={(e) => setForm({ ...form, guardian_name: e.target.value })} />
+            </Field>
+            <Field label="Guardian phone" htmlFor="s-phone">
+              <input id="s-phone" type="tel" inputMode="tel" placeholder="0712 345 678" value={form.guardian_phone}
+                onChange={(e) => setForm({ ...form, guardian_phone: e.target.value })} />
+            </Field>
             <button className="btn" type="submit">Add student</button>
           </div>
         </form>
@@ -151,10 +183,10 @@ export default function Students() {
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>Admission no</th><th>First name</th><th>Last name</th><th>Status</th><th>Risk</th>{canManage && <th>Action</th>}</tr>
+            <tr><th>Admission no</th><th>First name</th><th>Last name</th><th>Status</th>{canManage && <th>Parent or guardian</th>}<th>Risk</th>{canManage && <th>Action</th>}</tr>
           </thead>
           <tbody>
-            {shown.length === 0 && <tr className="empty"><td colSpan={6}>No students.</td></tr>}
+            {shown.length === 0 && <tr className="empty"><td colSpan={canManage ? 7 : 5}>No students.</td></tr>}
             {shown.map((s) =>
               editing === s.student_id ? (
                 <tr key={s.student_id} className="row-dirty">
@@ -162,6 +194,15 @@ export default function Students() {
                   <td><input aria-label="First name" value={draft.first_name} onChange={(e) => setDraft({ ...draft, first_name: e.target.value })} /></td>
                   <td><input aria-label="Last name" value={draft.last_name} onChange={(e) => setDraft({ ...draft, last_name: e.target.value })} /></td>
                   <td />
+                  <td className="guardian-edit">
+                    <input aria-label="Parent or guardian name" placeholder="Name" value={draft.guardian_name}
+                      onChange={(e) => setDraft({ ...draft, guardian_name: e.target.value })} />
+                    <input id={`guardian-phone-${s.student_id}`} aria-label="Guardian phone" type="tel" inputMode="tel" placeholder="0712 345 678"
+                      value={draft.guardian_phone} onChange={(e) => setDraft({ ...draft, guardian_phone: e.target.value })} />
+                    <label className="choice-inline">
+                      <input type="checkbox" checked={draft.results_sms} onChange={(e) => setDraft({ ...draft, results_sms: e.target.checked })} /> Results by SMS
+                    </label>
+                  </td>
                   <td />
                   <td className="actions">
                     <button type="button" className="btn link" aria-label="Save student changes" title="Save"
@@ -187,6 +228,16 @@ export default function Students() {
                   <td>{s.first_name}</td>
                   <td>{s.last_name}</td>
                   <td>{s.status === 'ACTIVE' ? 'Active' : <span className={s.status === 'GRADUATED' ? 'hint' : 'warn'}>{statusText(s)}</span>}</td>
+                  {canManage && (
+                    <td className="guardian-cell">
+                      {s.guardian_name || s.guardian_phone ? (
+                        <>
+                          {s.guardian_name && <span>{s.guardian_name}</span>}
+                          {s.guardian_phone && <span className="hint">{displayPhone(s.guardian_phone)}{s.results_sms === false ? ' · SMS off' : ''}</span>}
+                        </>
+                      ) : <span className="hint">None</span>}
+                    </td>
+                  )}
                   <td>
                     {canReadRisk && (risks.has(s.student_id) ? (
                       <div>
@@ -205,11 +256,7 @@ export default function Students() {
                       <button type="button" className="btn link" aria-label={`Edit ${s.first_name} ${s.last_name}`} title="Edit"
                         onClick={() => {
                           setEditing(s.student_id);
-                          setDraft({
-                            first_name: s.first_name,
-                            last_name: s.last_name,
-                            admission_no: s.admission_no
-                          });
+                          setDraft(draftOf(s));
                         }}
                       >
                         <ActionIcon name="edit" />

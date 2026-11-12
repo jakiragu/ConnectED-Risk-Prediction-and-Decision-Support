@@ -13,6 +13,7 @@ import AssessmentSetup from '../components/AssessmentSetup.jsx';
 import CheckpointWeights from '../components/CheckpointWeights.jsx';
 import GradingSettings from '../components/GradingSettings.jsx';
 import ClassSetupSettings from '../components/ClassSetupSettings.jsx';
+import ImportSettings from '../components/ImportSettings.jsx';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges.js';
 import Terms from './Terms.jsx';
 
@@ -31,6 +32,7 @@ export const SECTIONS = [
   { id: 'grading', label: 'Grading', blurb: 'Grade bands, pass mark, missing marks' },
   { id: 'subjects', label: 'Subjects', blurb: 'Subjects the school teaches' },
   { id: 'risk', label: 'Risk model', blurb: 'What risk estimates mean' },
+  { id: 'import', label: 'Import from CSV', blurb: 'Students, assessments and marks from a file' },
 ];
 
 function SchoolSection() {
@@ -204,6 +206,7 @@ export default function Settings() {
           {section === 'grading' && <GradingSettings schoolId={actor.schoolId} onDirtyChange={handlers.grading} />}
           {section === 'subjects' && <SubjectsSection />}
           {section === 'risk' && <RiskSection schoolId={actor.schoolId} />}
+          {section === 'import' && <ImportSettings schoolId={actor.schoolId} onDirtyChange={handlers.import} />}
         </section>
       </div>
     </>

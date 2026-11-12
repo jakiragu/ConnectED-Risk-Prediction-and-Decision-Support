@@ -22,6 +22,7 @@ export function emulateTransactions(ddb) {
         if (kind === 'Put') await send(new PutCommand(p));
         else if (kind === 'Update') await send(new UpdateCommand(p));
         else if (kind === 'Delete') await send(new DeleteCommand(p));
+        else if (kind === 'ConditionCheck') checkOnly(p, before);
         else throw new Error(`transactShim: ${kind} is not emulated`);
         undo.push({ TableName: p.TableName, Key, before });
       } catch (e) {
@@ -38,4 +39,16 @@ export function emulateTransactions(ddb) {
     }
     return {};
   };
+}
+
+/**
+ * A ConditionCheck writes nothing; only the existence checks the repositories use are emulated
+ * (e.g. assessmentRepo's termOpen: the term lock must not exist). Anything else is refused loudly.
+ */
+function checkOnly(p, item) {
+  const expr = p.ConditionExpression.trim();
+  const holds = expr === 'attribute_not_exists(PK)' ? !item
+    : expr === 'attribute_exists(PK)' ? Boolean(item)
+    : (() => { throw new Error(`transactShim: ConditionCheck "${expr}" is not emulated`); })();
+  if (!holds) throw Object.assign(new Error('The conditional request failed'), { name: 'ConditionalCheckFailedException' });
 }

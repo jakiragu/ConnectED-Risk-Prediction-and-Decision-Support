@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { gql } from '../api/graphql.js';
-import { LIST_REPORT_CARDS, LIST_RESULT_SETS, REQUEST_REPORT_CARD_DOWNLOAD } from '../api/operations.js';
+import {
+  LIST_REPORT_CARDS, LIST_RESULT_SETS, PREVIEW_RESULTS_SMS, REQUEST_REPORT_CARD_DOWNLOAD, SEND_RESULTS_SMS,
+} from '../api/operations.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { Offline, ActionIcon } from '../components/ui.jsx';
+import { Offline, ActionIcon, Dialog, Notice } from '../components/ui.jsx';
 import { Select } from '../components/Field.jsx';
 import StatusPill from '../components/StatusPill.jsx';
 import { db } from '../offline/db.js';
@@ -27,6 +29,135 @@ function save(url, fileName) {
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Africa/Nairobi' }) : '');
+/** Can this card's guardian be texted at all (a number, and not opted out)? */
+const reachable = (c) => c.has_guardian_phone && c.results_sms;
+/** Who "Text parents" would send to: reachable and not already sent this result. */
+const toSend = (cards) => cards.filter((c) => reachable(c) && c.sms_status !== 'SENT');
+
+/** One line saying what a send did, from the server's tally. */
+function outcomeText(o) {
+  const parts = [];
+  if (o.sent) parts.push(`Sent to ${plural(o.sent, 'parent')}.`);
+  if (o.failed) parts.push(`${plural(o.failed, 'message')} failed; the reason is on each row.`);
+  if (o.not_attempted) parts.push(`${plural(o.not_attempted, 'message')} not sent yet.`);
+  if (!o.sent && !o.failed && !o.not_attempted) parts.push('Nothing to send: every reachable parent already has this result.');
+  if (o.problem) parts.push(o.problem);
+  return parts.join(' ');
+}
+
+/** The Parent SMS cell: what happened to this result's message, or why there is none. */
+function SmsCell({ card, classId }) {
+  if (!card.has_guardian_phone) {
+    return (
+      <span className="hint">
+        No number · <Link to={`/classes/${classId}/students?edit=${card.student_id}`}>Add</Link>
+      </span>
+    );
+  }
+  if (!card.results_sms) return <span className="hint">Opted out</span>;
+  if (card.sms_status === 'SENT') {
+    return (
+      <span className="pill recorded" title={`Accepted by the SMS provider${card.sms_to_hint ? `, to ${card.sms_to_hint}` : ''}`}>
+        <ActionIcon name="check" />Sent {shortDate(card.sms_at)}
+      </span>
+    );
+  }
+  if (card.sms_status === 'FAILED') {
+    return (
+      <div className="sms-failed">
+        <span className="pill unrecorded">Failed</span>
+        {card.sms_problem && <span className="hint">{card.sms_problem}</span>}
+      </div>
+    );
+  }
+  if (card.sms_status === 'SENDING') return <span className="pill recording">Sending</span>;
+  return <span className="hint">Not sent</span>;
+}
+
+/**
+ * Confirms a send before anything goes out: who gets it, who is skipped and
+ * why, and the message itself. Every SMS costs credit and cannot be unsent.
+ */
+function SmsDialog({ ask, cards, scope, onClose, onSent }) {
+  const one = ask.card;
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    gql(PREVIEW_RESULTS_SMS, { ...scope, student_id: one?.student_id ?? null })
+      .then((d) => { if (live) setPreview(d.previewResultsSms); })
+      .catch((e) => { if (live) setError(e.message); });
+    return () => { live = false; };
+  }, [scope, one]);
+
+  const recipients = one ? 1 : toSend(cards).length;
+  const noNumber = cards.filter((c) => !c.has_guardian_phone).length;
+  const optedOut = cards.filter((c) => c.has_guardian_phone && !c.results_sms).length;
+  const already = cards.filter((c) => reachable(c) && c.sms_status === 'SENT').length;
+  const skipped = [
+    noNumber && `${noNumber} with no number`,
+    optedOut && `${optedOut} opted out`,
+    already && `${already} already sent`,
+  ].filter(Boolean);
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      const { sendResultsSms } = await gql(SEND_RESULTS_SMS, {
+        input: { ...scope, student_ids: one ? [one.student_id] : null, resend: Boolean(ask.resend) },
+      });
+      onSent(sendResultsSms);
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  }
+
+  const name = one ? `${one.first_name} ${one.last_name}` : null;
+  const title = one
+    ? (ask.resend ? `Send ${name}’s result again?` : `Text ${name}’s parent?`)
+    : `Text ${plural(recipients, 'parent')}?`;
+
+  return (
+    <Dialog open title={title} onClose={onClose} busy={busy} labelId="sms-dialog-title">
+      {!one && skipped.length > 0 && <p className="hint">Not included: {skipped.join(' · ')}.</p>}
+      {one && ask.resend && <p className="hint">This parent was already sent this result{one.sms_at ? ` on ${shortDate(one.sms_at)}` : ''}. They will get it again.</p>}
+      {!preview && !error && <p className="hint" role="status">Preparing the message…</p>}
+      {preview && (
+        <>
+          <div>
+            <div className="sms-preview-label">
+              <b>Message</b>
+              <span className="hint">
+                {preview.student_name && !one ? `as ${preview.student_name}’s parent sees it · ` : ''}
+                {plural(preview.segments, 'SMS', 'SMS')} per parent
+              </span>
+            </div>
+            <p className="sms-preview">{preview.text}</p>
+          </div>
+          {preview.ready && preview.sandbox && (
+            <Notice>Test mode: messages go to the SMS simulator or the local outbox, not to phones.</Notice>
+          )}
+          {!preview.ready && <Notice tone="error">{preview.problem}</Notice>}
+        </>
+      )}
+      {error && <div className="notice error" role="alert">{error}</div>}
+      <div className="row">
+        <button type="button" className="btn" data-autofocus onClick={send}
+          disabled={busy || !preview?.ready || recipients === 0}>
+          {busy ? 'Sending…' : one ? 'Send' : `Send to ${plural(recipients, 'parent')}`}
+        </button>
+        <button type="button" className="btn secondary" onClick={onClose} disabled={busy}>Cancel</button>
+      </div>
+    </Dialog>
+  );
+}
+
 export default function ReportCards() {
   const { actor, isAdmin } = useAuth();
   const { online } = useSync();
@@ -49,6 +180,8 @@ export default function ReportCards() {
   const [set, setSet] = useState(null);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
+  const [smsAsk, setSmsAsk] = useState(null);
+  const [smsNotice, setSmsNotice] = useState(null);
 
   useEffect(() => {
     repository.loadClasses(actor.schoolId).catch(() => {});
@@ -67,6 +200,7 @@ export default function ReportCards() {
 
   useEffect(() => {
     setError(null);
+    setSmsNotice(null);
     setCards([]);
     if (online) load().catch((e) => setError(e.message));
   }, [load, online]);
@@ -143,6 +277,9 @@ export default function ReportCards() {
     }
   }
 
+  // Stable between renders: the SMS dialog fetches its preview when this changes.
+  const smsScope = useMemo(() => ({ school_id: actor.schoolId, class_id: classId, term_id: termId, checkpoint }), [actor.schoolId, classId, termId, checkpoint]);
+
   if (!online) return <Offline what="Downloading report cards" />;
   if (!isAdmin && mine.length === 0) {
     return <div className="notice">Report cards are available to administrators and class teachers.</div>;
@@ -150,6 +287,7 @@ export default function ReportCards() {
 
   const ready = cards.filter((c) => c.available).length;
   const className = mine.find((c) => c.class_id === classId)?.name || '';
+  const smsCount = toSend(cards).length;
 
   return (
     <>
@@ -164,12 +302,29 @@ export default function ReportCards() {
       </div>
 
       {error && <div className="card error-card">{error}</div>}
+      {smsNotice && <Notice tone={smsNotice.tone}>{smsNotice.text}</Notice>}
+      {smsAsk && (
+        <SmsDialog ask={smsAsk} cards={cards} scope={smsScope} onClose={() => setSmsAsk(null)}
+          onSent={(outcome) => {
+            setSmsAsk(null);
+            setSmsNotice({ tone: outcome.failed || outcome.problem ? 'warn' : 'success', text: outcomeText(outcome) });
+            load().catch((e) => setError(e.message));
+          }} />
+      )}
 
       <div className="budget-row">
         {set && <StatusPill status={set.status} />}
         {set?.status === 'PUBLISHED'
           ? <span>{ready} of {cards.length} report cards ready{checkpoint === 'ENDTERM' ? ' (official)' : ' (provisional)'}</span>
           : <span>{setup.label(checkpoint)} results for {className} are not published, so there are no report cards yet.</span>}
+        {set?.status === 'PUBLISHED' && cards.length > 0 && <span className="grow" />}
+        {set?.status === 'PUBLISHED' && cards.length > 0 && (
+          <button type="button" className="btn secondary icon-text" disabled={busy !== null || smsCount === 0}
+            title={smsCount === 0 ? 'Every parent with a number has this result. Use a row’s message button to send one again.' : undefined}
+            onClick={() => { setSmsNotice(null); setSmsAsk({ card: null, resend: false }); }}>
+            <ActionIcon name="message" />{`Text parents (${smsCount})`}
+          </button>
+        )}
         {ready > 0 && (
           <button type="button" className="btn" disabled={busy !== null} onClick={all}>
             {busy === 'all' ? 'Downloading' : `Download all (${ready})`}
@@ -180,13 +335,14 @@ export default function ReportCards() {
       {cards.length > 0 && (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Adm no</th><th>Student</th><th>Card</th><th>Action</th></tr></thead>
+            <thead><tr><th>Adm no</th><th>Student</th><th>Card</th><th>Parent SMS</th><th>Action</th></tr></thead>
             <tbody>
               {cards.map((c) => (
                 <tr key={c.student_id}>
                   <td>{c.admission_no}</td>
                   <td>{c.first_name} {c.last_name}{c.student_status !== 'ACTIVE' && <span className="hint"> (deactivated)</span>}</td>
                   <td>{c.available ? (c.kind === 'OFFICIAL' ? 'Official' : 'Provisional') : <span className="hint">Being produced</span>}</td>
+                  <td><SmsCell card={c} classId={classId} /></td>
                   <td className="actions">
                     <button type="button" className="btn link" title="View report card"
                       aria-label={`View report card for ${c.first_name} ${c.last_name}`} disabled={!c.available || busy !== null}
@@ -205,6 +361,15 @@ export default function ReportCards() {
                     >
                       <ActionIcon name={busy === c.student_id ? 'loader' : 'download'} />
                     </button>
+                    {reachable(c) && (
+                      <button type="button" className="btn link" disabled={busy !== null || c.sms_status === 'SENDING'}
+                        aria-label={`${c.sms_status === 'SENT' ? 'Send again to' : c.sms_status === 'FAILED' ? 'Try again for' : 'Text'} the parent of ${c.first_name} ${c.last_name}`}
+                        title={c.sms_status === 'SENT' ? 'Send again' : c.sms_status === 'FAILED' ? 'Try again' : 'Text parent'}
+                        onClick={() => { setSmsNotice(null); setSmsAsk({ card: c, resend: c.sms_status === 'SENT' }); }}
+                      >
+                        <ActionIcon name={c.sms_status === 'FAILED' ? 'refresh' : 'message'} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -11,6 +11,7 @@ import * as platformIdentity from '../backend/library/platformIdentity.js';
 import { putStaff, registrationItems } from '../backend/library/platformStore.js';
 import { DEFAULT_ASSESSMENT_SCHEME } from '../backend/library/assessmentConfig.js';
 import { pathToFileURL } from 'node:url';
+import { normalisePhone } from '../backend/library/student.js';
 
 const seedStartedAt = Date.now();
 
@@ -501,8 +502,17 @@ for (const [admission_no, first_name, last_name, kind] of PAST_STUDENTS) {
   items.push({ PK: pk(SCHOOL), SK: sk.admissionNo(admission_no), entity: 'AdmissionNo', admission_no, student_id: `stu_${admission_no}` });
 }
 
+/*
+ * Guardian contacts for results by SMS. Every student gets a guardian name; numbers come
+ * only from DEMO_GUARDIAN_PHONES (comma-separated, cycled over the students), so a seed
+ * can never text strangers. Locally, messages only reach local/.data/sms anyway.
+ */
+const GUARDIAN_FIRST = ['Grace', 'Joseph', 'Mary', 'Peter', 'Jane', 'John', 'Esther', 'James', 'Ruth', 'Daniel'];
+const guardianPhones = String(process.env.DEMO_GUARDIAN_PHONES || '').split(',').map((p) => p.trim()).filter(Boolean)
+  .map((p) => normalisePhone(p));
+
 /* Create the student and admission-number records. */
-for (const student of students) {
+for (const [i, student] of students.entries()) {
   items.push({
     PK: pk(SCHOOL),
     SK: sk.student(student.student_id),
@@ -510,6 +520,8 @@ for (const student of students) {
     school_id: SCHOOL,
     status: 'ACTIVE',
     _version: 1,
+    guardian_name: `${GUARDIAN_FIRST[i % GUARDIAN_FIRST.length]} ${student.last_name}`,
+    ...(guardianPhones.length ? { guardian_phone: guardianPhones[i % guardianPhones.length] } : {}),
     ...student,
   });
 

@@ -87,9 +87,11 @@ def make_template():
         'RISK_PREDICTION_FUNCTION':sub('${AWS::StackName}-prediction'),'RISK_SCORER_FUNCTION':sub('${AWS::StackName}-scorer'),
         'REPORT_STATE_MACHINE_ARN':sub('arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-reports'),
         'SCHOOL_TIME_ZONE':'Africa/Nairobi',**mail_env}
+    # Results by SMS (deploy.py sms): Africa's Talking, called over HTTPS by the API function only.
+    sms_env={'AT_USERNAME':ref('AtUsername'),'AT_API_KEY':ref('AtApiKey'),'AT_SENDER_ID':ref('AtSenderId')}
     for n,handler,timeout,memory in [('Api','api',120,1024),('Prediction','prediction',900,1024),('Report','report',60,512)]:
         add(n+'Function','AWS::Lambda::Function',{'FunctionName':sub('${AWS::StackName}-'+handler),'Runtime':'nodejs22.x','Handler':handler+'.handler','Role':att('BackendRole','Arn'),
-            'Code':{'S3Bucket':ref('ArtifactBucket'),'S3Key':ref('CodeKey')},'Timeout':timeout,'MemorySize':memory,'Environment':{'Variables':env}})
+            'Code':{'S3Bucket':ref('ArtifactBucket'),'S3Key':ref('CodeKey')},'Timeout':timeout,'MemorySize':memory,'Environment':{'Variables':{**env,**(sms_env if n=='Api' else {})}}})
     add('ScorerRole','AWS::IAM::Role',{'AssumeRolePolicyDocument':trust('lambda.amazonaws.com'),'Policies':[{'PolicyName':'read-models','PolicyDocument':{'Version':'2012-10-17','Statement':[logs,policy(['s3:GetObject'],sub('${ModelBucket.Arn}/*'))]}}]})
     add('ScorerFunction','AWS::Lambda::Function',{'FunctionName':sub('${AWS::StackName}-scorer'),'PackageType':'Image','Architectures':['x86_64'],
         'Code':{'ImageUri':ref('ScorerImage')},'Role':att('ScorerRole','Arn'),'Timeout':900,'MemorySize':2048,'EphemeralStorage':{'Size':1024},
@@ -126,7 +128,10 @@ def make_template():
         'ScorerFunction':ref('ScorerFunction'),'PredictionFunction':ref('PredictionFunction'),'FailureQueueUrl':ref('FailureQueue')}.items()}
     return {'AWSTemplateFormatVersion':'2010-09-09','Description':'ConnectED isolated demo deployment: AppSync, two Cognito pools, serverless workflows, private S3 + CloudFront.',
         'Parameters':{k:{'Type':'String',**extra} for k,extra in {'ArtifactBucket':{},'CodeKey':{},'ScorerImage':{},'DynamoBillingMode':{'Default':'PROVISIONED','AllowedValues':['PROVISIONED','PAY_PER_REQUEST']},'GoogleClientId':{'Default':''},'GoogleClientSecret':{'Default':'','NoEcho':True},
-            'MailFrom':{'Default':'','Description':'Verified Amazon SES sender address. Set by deploy.py mail; empty keeps Cognito default email.'}}.items()},
+            'MailFrom':{'Default':'','Description':'Verified Amazon SES sender address. Set by deploy.py mail; empty keeps Cognito default email.'},
+            'AtUsername':{'Default':'','Description':"Africa's Talking username (sandbox for the simulator). Set by deploy.py sms; empty turns SMS off."},
+            'AtApiKey':{'Default':'','NoEcho':True},
+            'AtSenderId':{'Default':'','Description':"Approved Africa's Talking sender ID; empty uses the shared default sender."}}.items()},
         'Conditions':{'Provisioned':{'Fn::Equals':[ref('DynamoBillingMode'),'PROVISIONED']},'UseGoogle':{'Fn::Not':[{'Fn::Equals':[ref('GoogleClientId'),'']}]},'UseSes':{'Fn::Not':[{'Fn::Equals':[ref('MailFrom'),'']}]}},'Resources':R,'Outputs':outputs}
 if __name__=='__main__':
     out=ROOT/'deploy/aws/.build/template.json';out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(make_template(),indent=2));print(out)

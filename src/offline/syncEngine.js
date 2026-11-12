@@ -4,7 +4,7 @@ import { STATUS, backoffMs } from './outbox.js';
 import { gql } from '../api/graphql.js';
 import { CREATE_ASSESSMENT, LIST_ASSESSMENTS, LIST_SCORES, SUBMIT_SCORES, SYNC_SCORES } from '../api/operations.js';
 import { DELETE_INTERVENTION, SAVE_INTERVENTION } from '../api/decisionOperations.js';
-import { normalize, MAX_BATCH } from '@gradebook/domain/score';
+import { normalize, MAX_BATCH, MARK } from '@gradebook/domain/score';
 import { CONFLICT_REVIEW } from '@gradebook/domain/conflict';
 import { ulid } from '@gradebook/domain/ids';
 
@@ -55,13 +55,19 @@ async function pendingTargets() {
 
 // ------------------------------------------------------------------- writes
 
-export async function queueScore({ schoolId, assessment, studentId, rawScore, actor }) {
+/**
+ * One mark, saved on this device at once and sent when the server can be reached.
+ * markStatus is ABSENT or NOT_ASSESSED for those marks (rawScore is then null); omitted means SCORED.
+ * version is the server version the teacher was editing (see scoreDrafts.js); omitted means the
+ * version this device holds now.
+ */
+export async function queueScore({ schoolId, assessment, studentId, rawScore, markStatus = null, version, actor }) {
   const id = scoreKey(assessment.assessment_id, studentId);
   const cached = await db().scores.get(id);
-  if (rawScore === null && !cached) return;
+  if (rawScore === null && !markStatus && !cached) return; // clearing a mark that was never there
 
   await outbox.supersede(id);
-  const base = cached?._version ?? null; // the server version the teacher was looking at
+  const base = version !== undefined ? version : cached?._version ?? null; // the server version the teacher was looking at
 
   await db().scores.put({
     ...(cached || {}),
@@ -71,6 +77,7 @@ export async function queueScore({ schoolId, assessment, studentId, rawScore, ac
     class_id: assessment.class_id,
     student_id: studentId,
     raw_score: rawScore,
+    mark_status: markStatus || MARK.SCORED,
     normalized_score: rawScore === null ? null : normalize(rawScore, assessment.max_score),
     entered_by: actor.sub,
     status: cached?.status || 'ACTIVE',
@@ -86,6 +93,7 @@ export async function queueScore({ schoolId, assessment, studentId, rawScore, ac
       class_id: assessment.class_id,
       student_id: studentId,
       raw_score: rawScore,
+      ...(markStatus ? { mark_status: markStatus } : {}),
       _version: base,
     },
   });
@@ -271,6 +279,7 @@ async function pushScores(entries) {
           entries: entries.map((e) => ({
             student_id: e.payload.student_id,
             raw_score: e.payload.raw_score,
+            ...(e.payload.mark_status ? { mark_status: e.payload.mark_status } : {}),
             _version: e.payload._version,
           })),
         },

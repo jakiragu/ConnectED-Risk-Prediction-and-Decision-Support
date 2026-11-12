@@ -222,6 +222,34 @@ For real schools, request production access: SES console, Account dashboard, Req
 
 Locally nothing is sent: each email is printed in the `npm run api` terminal and saved under `local/.data/mail` (open the `.html` files in a browser).
 
+## Results by SMS (Africa's Talking)
+
+Report cards → **Text parents** sends each guardian the published result. The API function calls Africa's Talking over HTTPS; nothing else in the stack changes, and the table is untouched (guardian contacts are new attributes on student items; delivery records are new `RESULTSMS#…` items beside the report cards).
+
+### Turning it on
+
+1. Create an account at africastalking.com. The **sandbox** app is free: messages appear in their web simulator, not on phones. Generate its API key under Settings → API Key.
+2. Run, after `deploy` has run once with this code:
+
+   ```bash
+   python deploy/aws/deploy.py sms
+   ```
+
+   It asks for the username (`sandbox`, or your live app's username), the API key (hidden; a NoEcho parameter, given only to the API function) and, for a live app, an approved sender ID (Enter uses the shared default sender).
+3. To reach real phones, run it again with the live app's username and key. The live account needs credit; each message is one or two SMS (the confirmation dialog shows which).
+
+Until step 2, the Report cards page shows the SMS column and the button, and the dialog explains that SMS is not set up.
+
+### Guardian numbers for the demo school
+
+Add them through Settings → Import → Students: a file with `admission_no, first_name, last_name, class, guardian_name, guardian_phone` adds the contact to students already in ConnectED. Then take a new demo snapshot, or a demo reset removes them. A reset also removes SMS delivery records, so every result shows *Not sent* again.
+
+### Checks
+
+- A sandbox send shows *Sent* on each row and the messages in the Africa's Talking simulator.
+- A wrong key: the dialog's send ends with "The SMS account details on this deployment are wrong." and nothing else is attempted.
+- CloudWatch logs for the API function show `"svc":"sms"` lines without phone numbers.
+
 ## 140–180 minutes: live acceptance checks
 
 Do not mark the deployment complete until these pass:

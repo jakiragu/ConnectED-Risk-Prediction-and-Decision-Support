@@ -44,6 +44,9 @@ export const sk = {
   reportCard: (termId, checkpoint, studentId) => `REPORTCARD#${termId}#${checkpoint}#${studentId}`,
   reportCardPrefix: (termId, checkpoint) => `REPORTCARD#${termId}#${checkpoint}#`,
   reportCardDownload: (ulid) => `RCDOWNLOAD#${ulid}`,
+  // The SMS that told a student's guardian about a published result (one per student, term and checkpoint).
+  resultSms: (termId, checkpoint, studentId) => `RESULTSMS#${termId}#${checkpoint}#${studentId}`,
+  resultSmsPrefix: (termId, checkpoint) => `RESULTSMS#${termId}#${checkpoint}#`,
   // A student's published result at one checkpoint, kept per class so a transfer loses nothing.
   studentResult: (studentId, termId, checkpoint, classId) => `STUDENTRESULT#${studentId}#${termId}#${checkpoint}#${classId}`,
   studentResultPrefix: (studentId) => `STUDENTRESULT#${studentId}#`,

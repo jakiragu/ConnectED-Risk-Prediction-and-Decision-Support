@@ -25,6 +25,15 @@ export const LIST_ASSESSMENTS = `
     }
   }`;
 
+/** One page of a class's assessments in a term; the CSV import reads every page. */
+export const LIST_ASSESSMENTS_PAGE = `
+  query ListAssessmentsPage($school_id: ID!, $class_id: ID!, $term_id: ID!, $limit: Int, $nextToken: String) {
+    listAssessmentsByClass(school_id: $school_id, class_id: $class_id, term_id: $term_id, limit: $limit, nextToken: $nextToken) {
+      nextToken
+      items { ${ASSESSMENT_FIELDS} }
+    }
+  }`;
+
 export const LIST_DELETED_ASSESSMENTS = `
   query ListDeletedAssessments($school_id: ID!, $class_id: ID!, $term_id: ID!) {
     listDeletedAssessments(school_id: $school_id, class_id: $class_id, term_id: $term_id) {
@@ -221,7 +230,7 @@ const TEACHER_FIELDS = `
   assignments { class_id subject } created_at updated_at _version
 `;
 const CLASS_FIELDS = `class_id name grade stream year status class_teacher_id class_teacher_name student_count promoted_from_class_id promoted_to_class_id _version`;
-const STUDENT_FIELDS = `student_id first_name last_name admission_no class_id status graduation_year left_year departure_kind deactivation_reason deactivation_date _version`;
+const STUDENT_FIELDS = `student_id first_name last_name admission_no class_id status graduation_year left_year departure_kind deactivation_reason deactivation_date guardian_name guardian_phone results_sms _version`;
 
 export const ME = `
   query Me($school_id: ID!) { me(school_id: $school_id) { ${TEACHER_FIELDS} } }`;
@@ -296,12 +305,27 @@ export const LIST_REPORT_CARDS = `
   query ListReportCards($school_id: ID!, $class_id: ID!, $term_id: ID!, $checkpoint: Checkpoint!) {
     listReportCards(school_id: $school_id, class_id: $class_id, term_id: $term_id, checkpoint: $checkpoint) {
       student_id admission_no first_name last_name student_status checkpoint kind available generated_at
+      has_guardian_phone results_sms sms_status sms_at sms_problem sms_to_hint
     }
   }`;
 
 export const REQUEST_REPORT_CARD_DOWNLOAD = `
   mutation RequestReportCardDownload($input: ReportCardDownloadInput!) {
     requestReportCardDownload(input: $input) { url file_name expires_at }
+  }`;
+
+// ------------------------------------------------------------ results by SMS
+
+export const PREVIEW_RESULTS_SMS = `
+  query PreviewResultsSms($school_id: ID!, $class_id: ID!, $term_id: ID!, $checkpoint: Checkpoint!, $student_id: ID) {
+    previewResultsSms(school_id: $school_id, class_id: $class_id, term_id: $term_id, checkpoint: $checkpoint, student_id: $student_id) {
+      student_id student_name text segments ready sandbox problem
+    }
+  }`;
+
+export const SEND_RESULTS_SMS = `
+  mutation SendResultsSms($input: SendResultsSmsInput!) {
+    sendResultsSms(input: $input) { sent failed no_number opted_out already_sent not_attempted problem }
   }`;
 
 // ------------------------------------------------------------ year-end promotion (administrators)

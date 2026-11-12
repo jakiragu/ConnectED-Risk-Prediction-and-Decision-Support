@@ -82,6 +82,9 @@ type Student {
   deactivation_reason: String
   deactivation_date: AWSDate
   left_year: Int                  # set by a promotion that recorded the student as leaving
+  guardian_name: String           # admin and class teacher only; null for others
+  guardian_phone: String          # international form, +254712345678; admin and class teacher only
+  results_sms: Boolean            # guardian is sent published results by SMS (default true); admin and class teacher only
   _version: Int
 }
 
@@ -146,6 +149,33 @@ type ReportCardEntry {
   kind: String                    # OFFICIAL | PROVISIONAL
   available: Boolean!
   generated_at: AWSDateTime
+  has_guardian_phone: Boolean!     # whether a results SMS can reach this student's guardian
+  results_sms: Boolean!            # false: the guardian opted out of results by SMS
+  sms_status: String               # SENDING | SENT | FAILED for this published result; null: not sent
+  sms_at: AWSDateTime
+  sms_problem: String              # why the last attempt failed
+  sms_to_hint: String              # the last digits of the number it went to, e.g. …678
+}
+
+# What a results SMS will say, shown before anything is sent.
+type ResultsSmsPreview {
+  student_id: ID
+  student_name: String
+  text: String
+  segments: Int!                   # SMS a message costs: 160 characters for one, 153 each when split
+  ready: Boolean!                  # SMS is set up on this deployment
+  sandbox: Boolean!                # messages go to a simulator or the local outbox, not to phones
+  problem: String
+}
+
+type ResultsSmsOutcome {
+  sent: Int!
+  failed: Int!
+  no_number: Int!
+  opted_out: Int!
+  already_sent: Int!
+  not_attempted: Int!              # not tried because sending stopped early; send again to finish
+  problem: String                  # why sending stopped early
 }
 
 type ReportCardDownload {
@@ -1118,6 +1148,9 @@ input CreateStudentInput {
   first_name: String!
   last_name: String!
   admission_no: String!
+  guardian_name: String
+  guardian_phone: String           # 0712 345 678, +254712345678, or +<country code> for other countries
+  results_sms: Boolean             # default true
 }
 
 input UpdateStudentInput {
@@ -1126,7 +1159,19 @@ input UpdateStudentInput {
   first_name: String
   last_name: String
   admission_no: String
+  guardian_name: String            # empty clears it; left out keeps it
+  guardian_phone: String           # empty clears it; left out keeps it
+  results_sms: Boolean
   _version: Int!
+}
+
+input SendResultsSmsInput {
+  school_id: ID!
+  class_id: ID!
+  term_id: ID!
+  checkpoint: Checkpoint!
+  student_ids: [ID!]               # empty or left out: every student in the published result
+  resend: Boolean                  # also send to guardians already sent this result
 }
 
 input TransferStudentInput {
@@ -1799,6 +1844,7 @@ type Query {
   listSchoolClasses(school_id: ID!): [Class!]!                               # Admin
   listStudents(school_id: ID!, class_id: ID!, include_inactive: Boolean): [Student!]!
   listReportCards(school_id: ID!, class_id: ID!, term_id: ID!, checkpoint: Checkpoint!): [ReportCardEntry!]!  # Admin | class teacher
+  previewResultsSms(school_id: ID!, class_id: ID!, term_id: ID!, checkpoint: Checkpoint!, student_id: ID): ResultsSmsPreview!  # Admin | class teacher
   getClassAttendance(school_id: ID!, class_id: ID!, term_id: ID!, period: AttendancePeriodName!): ClassAttendance!
   getFeatureContract(school_id: ID!): FeatureContract!
   getFeatureReadiness(school_id: ID!, class_id: ID, prediction_point: String!, academic_year: Int): FeatureReadiness!   # Admin | class teacher; no class_id: every class, Admin only
@@ -1858,6 +1904,7 @@ type Mutation {
   transferStudent(input: TransferStudentInput!): Student!                    # Admin
   setStudentStatus(input: SetStudentStatusInput!): Student!                  # Admin | class teacher
   requestReportCardDownload(input: ReportCardDownloadInput!): ReportCardDownload!   # Admin | class teacher
+  sendResultsSms(input: SendResultsSmsInput!): ResultsSmsOutcome!                # Admin | class teacher; published results only
   createTerm(input: CreateTermInput!): Term!                                  # Admin
   updateTerm(input: UpdateTermInput!): Term!                                  # Admin
   submitAttendance(input: SubmitAttendanceInput!): SubmitAttendanceResult!    # Admin | class teacher

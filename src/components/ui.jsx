@@ -121,6 +121,16 @@ export function ActionIcon({ name }) {
     x: (
       <path d="m18 6-12 12M6 6l12 12" />
     ),
+    message: (
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" />
+    ),
+    refresh: (
+      <>
+        <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" />
+        <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" />
+        <path d="M21 3v5h-5M3 21v-5h5" />
+      </>
+    ),
   };
 
   return (

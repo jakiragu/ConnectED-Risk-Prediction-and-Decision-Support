@@ -4380,3 +4380,147 @@ th .sort:focus-visible {
 .ranking {
   min-width: 48rem;
 }
+
+/* ---- Settings: import from CSV ---- */
+/* The file input is hidden; its label is the button, so it shows the focus the input has. */
+.file-pick {
+  cursor: pointer;
+}
+
+.file-pick:focus-within {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.file-pick.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.import-table {
+  max-height: 28rem;
+}
+
+.import-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.import-result .hint {
+  display: block;
+  margin-top: 2px;
+}
+
+.import-warnings {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.2rem;
+}
+
+.save-bar .progress .track {
+  width: 12rem;
+}
+
+/* What an import file should look like: open until a file is chosen, then folded away. */
+.column-guide > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.column-guide > summary::-webkit-details-marker {
+  display: none;
+}
+
+.column-guide > summary::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  transform: rotate(45deg);
+  margin-right: var(--space-2);
+}
+
+.column-guide[open] > summary::after {
+  transform: rotate(-135deg);
+}
+
+.column-table td {
+  vertical-align: top;
+}
+
+.column-table td:first-child {
+  white-space: nowrap;
+}
+
+/* An example file: lighter than a data table, so it reads as a sample rather than records. */
+.sample-head {
+  margin: var(--space-2) 0 0;
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+.sample-table thead th {
+  background: var(--surface-alt);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line-soft);
+  font-weight: 600;
+}
+
+.sample-table tbody tr:nth-child(even) {
+  background: none;
+}
+
+.sample-table td,
+.sample-table th {
+  white-space: nowrap;
+}
+
+
+.import-table td:not(.import-result) {
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------ results by SMS */
+
+.sms-preview-label {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: baseline;
+  margin-bottom: var(--space-2);
+}
+
+.dialog .sms-preview {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-alt);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  font-size: var(--t-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sms-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 260px;
+}
+
+.guardian-cell .hint {
+  display: block;
+}
+
+.guardian-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 170px;
+}
