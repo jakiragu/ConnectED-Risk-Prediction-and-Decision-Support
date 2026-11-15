@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { db, dropFor } from '../offline/db.js';
 import { useLive } from '../offline/useLive.js';
@@ -8,6 +8,8 @@ import SyncBar from './SyncBar.jsx';
 import GlobalSearch from './GlobalSearch.jsx';
 import { useSidebar, SIDEBAR } from '../hooks/useSidebar.js';
 import { SCHOOL_SUSPENDED_EVENT } from '../api/graphql.js';
+import { describeRole } from '../roles.js';
+import angazaLogo from '../assets/angaza-center-logo.png';
 
 /**
  * Grouped by purpose rather than listed by feature. Every user: dashboard, classes, assessments, results.
@@ -85,19 +87,13 @@ function breadcrumbsFor(pathname) {
     return [home, { label: 'Log an intervention' }];
   }
 
-  const studentMatch = path.match(/^\/students\/([^/]+)\/(risk|interventions)$/);
-  if (studentMatch) {
-    const [, studentId, page] = studentMatch;
-    const crumbs = [
-      home,
-      { label: 'Classes', to: '/classes' },
-      { label: 'Student profile', to: `/students/${studentId}/risk` },
-    ];
+  // Without a recorded origin (an address typed or opened from a bookmark), only the page itself.
+  if (/^\/students\/[^/]+\/risk$/.test(path)) {
+    return [home, { label: 'Student profile' }];
+  }
 
-    if (page === 'interventions') crumbs.push({ label: 'Interventions' });
-    else crumbs[crumbs.length - 1] = { label: 'Student profile' };
-
-    return crumbs;
+  if (/^\/students\/[^/]+\/interventions$/.test(path)) {
+    return [home, { label: 'Interventions' }];
   }
 
   if (path === '/assessments') {
@@ -131,6 +127,39 @@ function breadcrumbsFor(pathname) {
     : [home];
 }
 
+/**
+ * The trail the user actually took. Pages that open a student (or an intervention form) pass where
+ * they were as state.from (see navigation.js), so the trail is that page's own trail followed by
+ * this page, rather than one fixed route. A profile opened from the dashboard reads
+ * Dashboard > Student profile; one opened from a class list reads ... > Students > Student profile.
+ */
+function trailFor(location) {
+  const path = location.pathname.replace(/\/+$/, '') || '/';
+  const from = typeof location.state?.from === 'string' ? location.state.from : null;
+  const fromPath = from ? from.split(/[?#]/)[0].replace(/\/+$/, '') || '/' : null;
+  const student = path.match(/^\/students\/([^/]+)\/(risk|interventions)$/);
+
+  if ((!student && path !== '/interventions/new') || !fromPath || fromPath === path) {
+    return breadcrumbsFor(path);
+  }
+
+  const origin = breadcrumbsFor(fromPath);
+  origin[origin.length - 1] = { ...origin[origin.length - 1], to: from };
+
+  if (path === '/interventions/new') return [...origin, { label: 'Log an intervention' }];
+
+  const [, studentId, page] = student;
+  if (page === 'risk') return [...origin, { label: 'Student profile' }];
+
+  // The intervention form: the profile is in the trail only when the user came through it.
+  const crumbs = [...origin];
+  if (location.state?.via === 'profile') {
+    crumbs.push({ label: 'Student profile', to: `/students/${studentId}/risk`, state: { from } });
+  }
+  crumbs.push({ label: 'Interventions' });
+  return crumbs;
+}
+
 function activeSectionFor(pathname) {
   if (pathname.startsWith('/classes/') || pathname.startsWith('/students/')) {
     return '/classes';
@@ -153,9 +182,10 @@ export default function Layout() {
   const { actor, isAdmin, signOut, displayName, schoolName } = useAuth();
   const classes = useLive(() => db().classes.toArray(), [], []);
   const isClassTeacher = classes.some((c) => c.is_class_teacher);
+  const { role, detail: roleDetail } = describeRole({ isAdmin, classes });
   const navigate = useNavigate();
   const location = useLocation();
-  const breadcrumbs = breadcrumbsFor(location.pathname);
+  const breadcrumbs = trailFor(location);
   const activeSection = activeSectionFor(location.pathname);
 
   useEffect(() => startSync(actor), [actor.sub]);
@@ -257,6 +287,9 @@ export default function Layout() {
               Log out
             </a>
           </nav>
+          <div className="sidebar-partner">
+            <img src={angazaLogo} alt="Angaza Center" width="64" height="64" />
+          </div>
           <div className="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the menu"
             aria-valuemin={SIDEBAR.min} aria-valuemax={SIDEBAR.max} aria-valuenow={width} tabIndex={0}
             title="Drag to resize. Double-click to reset." onPointerDown={startResize} onKeyDown={resizeByKey}
@@ -273,10 +306,19 @@ export default function Layout() {
           </button>
           <GlobalSearch />
           <SyncBar />
-          <NavLink to="/profile" className="who profile-link">
-            <span>{displayName}</span>
-            <span>{schoolName || 'School profile unavailable'}</span>
-          </NavLink>
+          <div className="who">
+            {/* Only the name leads to the profile. Hovering it (or focusing it) shows the role. */}
+            <div className="user-menu">
+              <Link to="/profile" className="user-name" aria-describedby="user-card">{displayName}</Link>
+              <div className="user-card" id="user-card">
+                <b>{displayName}</b>
+                <span className="pill role">{role}</span>
+                {roleDetail && <span className="hint">{roleDetail}</span>}
+                <Link to="/profile" className="user-card-link" tabIndex={-1}>Go to my profile</Link>
+              </div>
+            </div>
+            <span className="school-name">{schoolName || 'School profile unavailable'}</span>
+          </div>
         </header>
         <main className="page">
           <nav className="breadcrumbs" aria-label="Breadcrumb">
@@ -284,7 +326,7 @@ export default function Layout() {
               {breadcrumbs.map((crumb, index) => (
                 <li key={`${crumb.label}-${index}`}>
                   {crumb.to ? (
-                    <Link to={crumb.to}>{crumb.label}</Link>
+                    <Link to={crumb.to} state={crumb.state}>{crumb.label}</Link>
                   ) : (
                     <span aria-current="page">{crumb.label}</span>
                   )}

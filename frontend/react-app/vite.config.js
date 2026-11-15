@@ -18,7 +18,7 @@ export default defineConfig({
       injectRegister: 'script',     // adds a small registerSW.js to index.html; no app code changes
       manifest: false,              // offline loading only; not an installable app
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,webp,ico,woff2}'],
         navigateFallback: '/index.html', // any in-app address (e.g. /assessments/…/scores) opens the kept app
         cleanupOutdatedCaches: true,
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,

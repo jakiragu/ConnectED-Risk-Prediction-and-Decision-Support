@@ -10,6 +10,7 @@ import { repository } from '../offline/repository.js';
 import { useLive } from '../offline/useLive.js';
 import { useSync } from '../offline/useSync.js';
 import { classLabels } from '../classLabels.js';
+import { describeRole } from '../roles.js';
 
 const pct = (p) => `${Math.round(p * 100)}%`;
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : '');
@@ -47,6 +48,8 @@ export default function Dashboard() {
   // Flagged students ticked for one intervention; kept across search and pages.
   const [picked, setPicked] = useState(() => new Set());
   const [query, setQuery] = useState('');
+  // The search results float over the page; they close when focus leaves the search or on Escape.
+  const [findOpen, setFindOpen] = useState(false);
   const [riskPage, setRiskPage] = useState(1);
   const RISK_PAGE_SIZE = 10;
   const classes = useLive(() => db().classes.toArray(), [], []);
@@ -73,6 +76,7 @@ export default function Dashboard() {
   };
 
   const className = useMemo(() => classLabels(classes), [classes]);
+  const { role, detail: roleDetail } = describeRole({ isAdmin, classes });
   const classById = useMemo(() => new Map(classes.map((c) => [c.class_id, c])), [classes]);
   const found = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -140,7 +144,10 @@ export default function Dashboard() {
   return (
     <div className="stack">
       <div className="page-head">
-        <h1>Hello, {displayName}</h1>
+        <div className="greeting">
+          <h1>Hello, {displayName}</h1>
+          <span className="pill role-tag" title={roleDetail || undefined}>{role}</span>
+        </div>
         {d?.term_name && <span className="hint">{d.term_name}</span>}
       </div>
       {view.fromDevice && !view.refreshing && <div className="notice">You are offline. This is the copy saved on this device at {when(view.savedAt)}.</div>}
@@ -155,36 +162,45 @@ export default function Dashboard() {
             <div className="stat"><b>{d.pending_assessments.length}</b><span>papers still being marked</span></div>
           </div>
         )}
-        <div className="card stack find">
+        <div className="card stack find"
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setFindOpen(false); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setFindOpen(false); }}>
           <label htmlFor="find-student"><b>Find a student</b></label>
-          <input id="find-student" type="search" placeholder="Name or admission number" value={query}
-            onFocus={loadRosters} onChange={(e) => { loadRosters(); setQuery(e.target.value); }} />
-          {found.length > 0 && (
-            <ul className="found" aria-label="Matching students">
-              {found.map((s) => {
-                const klass = classById.get(s.class_id);
-                // Logging needs a role in the student's class: administrator, class teacher, or a subject taught there.
-                const canLog = isAdmin || klass?.is_class_teacher === true || (klass?.my_subjects?.length ?? 0) > 0;
-                return (
-                  <li key={s.student_id}>
-                    <div className="found-who">
-                      <b>{s.first_name} {s.last_name}</b>
-                      <span className="hint">{[s.admission_no, className.get(s.class_id)].filter(Boolean).join(' · ')}</span>
-                    </div>
-                    <div className="found-actions">
-                      <Link className="btn link student-quick-action" title="Risk profile" aria-label={`Risk profile for ${s.first_name} ${s.last_name}`} to={`/students/${s.student_id}/risk`} state={{ from: '/dashboard' }}><ActionIcon name="users" /></Link>
-                      {canLog && (
-                        <Link className="btn link student-quick-action" title="Log intervention" aria-label={`Log intervention for ${s.first_name} ${s.last_name}`} to={`/students/${s.student_id}/interventions`} state={{ from: '/dashboard' }}><ActionIcon name="clipboard" /></Link>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {query.trim().length >= 2 && !found.length && (
-            <span className="hint" role="status">{rosters === 'loading' ? 'Looking through your classes…' : 'No student in your classes matches.'}</span>
-          )}
+          <div className="find-field">
+            <input id="find-student" type="search" placeholder="Name or admission number" value={query}
+              autoComplete="off" aria-expanded={findOpen && query.trim().length >= 2} aria-controls="find-results"
+              onFocus={() => { loadRosters(); setFindOpen(true); }}
+              onChange={(e) => { loadRosters(); setQuery(e.target.value); setFindOpen(true); }} />
+            {findOpen && query.trim().length >= 2 && (
+              <div className="find-popup" id="find-results">
+                {found.length > 0 ? (
+                  <ul className="found" aria-label="Matching students">
+                    {found.map((s) => {
+                      const klass = classById.get(s.class_id);
+                      // Logging needs a role in the student's class: administrator, class teacher, or a subject taught there.
+                      const canLog = isAdmin || klass?.is_class_teacher === true || (klass?.my_subjects?.length ?? 0) > 0;
+                      return (
+                        <li key={s.student_id}>
+                          <div className="found-who">
+                            <b>{s.first_name} {s.last_name}</b>
+                            <span className="hint">{[s.admission_no, className.get(s.class_id)].filter(Boolean).join(' · ')}</span>
+                          </div>
+                          <div className="found-actions">
+                            <Link className="btn link student-quick-action" title="Risk profile" aria-label={`Risk profile for ${s.first_name} ${s.last_name}`} to={`/students/${s.student_id}/risk`} state={{ from: '/dashboard' }}><ActionIcon name="users" /></Link>
+                            {canLog && (
+                              <Link className="btn link student-quick-action" title="Log intervention" aria-label={`Log intervention for ${s.first_name} ${s.last_name}`} to={`/students/${s.student_id}/interventions`} state={{ from: '/dashboard' }}><ActionIcon name="clipboard" /></Link>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <span className="hint" role="status">{rosters === 'loading' ? 'Looking through your classes…' : 'No student in your classes matches.'}</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

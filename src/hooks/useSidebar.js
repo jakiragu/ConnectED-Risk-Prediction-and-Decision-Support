@@ -19,12 +19,20 @@ const read = (key, fallback) => {
 const write = (key, value) => {
   try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* not remembered; still works this session */ }
 };
+// A fresh sign-in starts with only Teaching open; folding is remembered from then on.
+const SIGN_IN_FOLDED = ['Results', 'Insights', 'Administration', 'You'];
+
+/** Called on sign-in: forget the previous session's folding, so the defaults above apply. */
+export function resetSidebarGroups() {
+  write(KEY.collapsed, SIGN_IN_FOLDED);
+}
+
 const clamp = (w) => Math.round(Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, Number(w) || SIDEBAR.default)));
 
 export function useSidebar() {
   const [width, setWidthState] = useState(() => clamp(read(KEY.width, SIDEBAR.default)));
   const [hidden, setHiddenState] = useState(() => Boolean(read(KEY.hidden, false)));
-  const [collapsed, setCollapsedState] = useState(() => new Set(read(KEY.collapsed, [])));
+  const [collapsed, setCollapsedState] = useState(() => new Set(read(KEY.collapsed, SIGN_IN_FOLDED)));
 
   /** persist=false while dragging, so storage is written once when the drag ends. */
   const setWidth = useCallback((w, persist = true) => {

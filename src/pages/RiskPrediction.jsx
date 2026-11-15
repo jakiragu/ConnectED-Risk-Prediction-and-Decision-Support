@@ -105,6 +105,14 @@ export default function RiskPrediction() {
   const loadRequest = useRef(0);
 
   const [rows, setRows] = useState(null);
+  // The model's evaluation chart can be hidden; the choice is remembered on this device.
+  const [showEvaluation, setShowEvaluation] = useState(() => {
+    try { return window.localStorage.getItem('connected.risk.showEvaluation') !== 'false'; } catch { return true; }
+  });
+  const toggleEvaluation = () => setShowEvaluation((on) => {
+    try { window.localStorage.setItem('connected.risk.showEvaluation', String(!on)); } catch { /* still works this session */ }
+    return !on;
+  });
   const [year, setYear] = useState(null);
   const [run, setRun] = useState(null);
   const [terms, setTerms] = useState([]);
@@ -368,18 +376,24 @@ export default function RiskPrediction() {
         <section className="insight-section" aria-labelledby="drivers-title">
           <div className="row">
             <h2 id="drivers-title" className="grow">What drives the estimates at {SHORT[point.value]}</h2>
+            {importance.model?.groups?.length > 0 && (
+              <button type="button" className="btn link small evaluation-toggle" aria-expanded={showEvaluation}
+                onClick={toggleEvaluation}>
+                {showEvaluation ? 'Hide the model’s evaluation' : 'Show the model’s evaluation'}
+              </button>
+            )}
             <Info label="About these charts">
               The average size of each factor&apos;s influence (mean absolute SHAP), in either direction. It shows what the model
               pays attention to, not what causes risk.
             </Info>
           </div>
-          <div className="graph-grid">
+          <div className={`graph-grid${showEvaluation && importance.model?.groups?.length > 0 ? '' : ' single'}`}>
             <ChartCard title={all ? 'Across the school' : `In ${shown[0]?.name}`}
               subtitle={`Share of what moved the estimates${importance.observed?.students ? ` of ${importance.observed.students} students` : ''}`}>
               <ShareBars items={importance.observed?.groups} label="Influence in this group" />
             </ChartCard>
-            {importance.model?.groups?.length > 0 && (
-              <ChartCard title="In the model’s evaluation" subtitle="The same measure on the students the model was tested on">
+            {showEvaluation && importance.model?.groups?.length > 0 && (
+              <ChartCard className="model-evaluation" title="In the model’s evaluation" subtitle="The same measure on the students the model was tested on">
                 <ShareBars items={importance.model.groups} label="Influence in the model's evaluation" />
               </ChartCard>
             )}

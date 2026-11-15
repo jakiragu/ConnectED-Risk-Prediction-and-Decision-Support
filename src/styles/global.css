@@ -1,5 +1,5 @@
 @import './tokens.css';
-@import url('https://fonts.googleapis.com/css2?family=Goldman:wght@400;700&family=Quicksand:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@144,900,100&family=Goldman:wght@400;700&family=Quicksand:wght@400;500;600;700&display=swap');
 
 *,
 *::before,
@@ -161,9 +161,10 @@ a {
   font-size: var(--t-sm);
 }
 
-.topbar .who span+span {
+.topbar .who .school-name {
   padding-left: var(--space-4);
   border-left: 1px solid var(--line-soft);
+  color: var(--body);
 }
 
 .page {
@@ -4523,4 +4524,354 @@ th .sort:focus-visible {
   flex-direction: column;
   gap: var(--space-1);
   min-width: 170px;
+}
+
+/* ======================================================================
+   Sign-in: chalkboard on the left, the form on the right (one card).
+   ====================================================================== */
+.sign-in-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6) var(--space-5);
+}
+
+.sign-in-card {
+  width: min(100%, 1040px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border: 1px solid var(--ink);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--surface-alt);
+  box-shadow: -4px 5px 0 rgba(10, 76, 85, 0.12);
+}
+
+.sign-in-art {
+  min-height: 520px;
+  background-color: var(--ink);
+  background-size: cover;
+  background-position: center;
+}
+
+.sign-in-form {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--space-7) clamp(var(--space-6), 4vw, 3.5rem);
+}
+
+.sign-in-form > .stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sign-in-brand {
+  text-align: center;
+  margin-bottom: var(--space-6);
+}
+
+.sign-in-brand p {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+  color: var(--body);
+}
+
+.sign-in-name,
+.sign-in-sub {
+  font-family: 'Fraunces', 'Cooper Black', Georgia, serif;
+  font-weight: 900;
+  font-variation-settings: 'SOFT' 100, 'opsz' 144;
+  color: var(--ink);
+  line-height: 1.05;
+}
+
+.sign-in-name {
+  font-size: clamp(2.5rem, 5vw, 3.6rem);
+  letter-spacing: 0.01em;
+}
+
+.sign-in-sub {
+  margin-top: var(--space-2);
+  font-size: clamp(1.05rem, 2vw, 1.4rem);
+}
+
+.sign-in-form h2 {
+  font-size: var(--t-xl);
+  font-weight: 500;
+  color: var(--body);
+}
+
+.sign-in-form input[type='email'],
+.sign-in-form input[type='password'],
+.sign-in-form input[type='text'] {
+  background: var(--surface-alt);
+  border-color: var(--body);
+}
+
+.sign-in-form .field > label {
+  font-size: var(--t-base);
+  color: var(--body);
+}
+
+.sign-in-form .remember-row {
+  color: var(--body);
+}
+
+.google-logo {
+  flex: none;
+}
+
+@media (max-width: 820px) {
+  .sign-in-card {
+    grid-template-columns: 1fr;
+  }
+
+  .sign-in-art {
+    min-height: 110px;
+  }
+
+  .sign-in-form {
+    padding: var(--space-6) var(--space-5);
+  }
+}
+
+/* ======================================================================
+   Top bar: the name is the only link to the profile; hovering it shows the role.
+   ====================================================================== */
+.user-menu {
+  position: relative;
+}
+
+.user-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.user-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  min-width: 15rem;
+  max-width: 20rem;
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(10, 76, 85, 0.12);
+  font-size: var(--t-sm);
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0s linear 0.18s;
+}
+
+/* An invisible bridge across the gap, so the pointer can move from the name onto the card. */
+.user-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -12px;
+  height: 12px;
+}
+
+.user-menu:hover .user-card,
+.user-menu:focus-within .user-card {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition-delay: 0s;
+}
+
+.user-card b {
+  color: var(--ink-strong);
+  font-size: var(--t-base);
+}
+
+.user-card .pill.role {
+  color: var(--ink);
+  background: var(--surface-alt);
+}
+
+.user-card-link {
+  margin-top: var(--space-1);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-card {
+    transition: none;
+  }
+}
+
+/* Sidebar: the Angaza Center logo under Log out, kept small. */
+.sidebar-partner {
+  padding: var(--space-5) var(--space-5) var(--space-3);
+  margin: var(--space-3) var(--space-3) 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.sidebar-partner img {
+  display: block;
+  width: 64px;
+  height: auto;
+}
+
+/* ======================================================================
+   Dashboard: greeting with role, equal-height top row, floating search results
+   ====================================================================== */
+.greeting {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-right: auto;
+}
+
+.greeting h1 {
+  margin: 0;
+}
+
+.pill.role-tag {
+  color: var(--ink);
+  background: var(--surface);
+  font-size: var(--t-sm);
+  padding: 3px 12px;
+}
+
+/* The stat tiles and "Find a student" share one height. */
+.dash-top {
+  align-items: stretch;
+}
+
+.dash-top .stats {
+  grid-auto-rows: 1fr;
+}
+
+.dash-top .stat {
+  align-content: center;
+}
+
+.dash-top .find {
+  gap: var(--space-2);
+  padding: var(--space-4);
+  justify-content: center;
+}
+
+.find-field {
+  position: relative;
+}
+
+.find-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: min(60vh, 26rem);
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 22px rgba(10, 76, 85, 0.14);
+}
+
+.find-popup > .hint {
+  display: block;
+  padding: var(--space-3) 0;
+}
+
+.find-popup .found {
+  margin-top: 0;
+  border-top: 0;
+}
+
+/* Breathing room around the flagged students' page controls. */
+.risk-pagination {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ======================================================================
+   Student profile header: who the student is | what you teach them
+   ====================================================================== */
+.stack > .back {
+  align-self: flex-start;
+}
+
+.card.profile-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  justify-items: stretch;
+  align-items: start;
+  text-align: left;
+  gap: 0;
+  padding: 0;
+}
+
+.profile-head > div {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+.profile-head > div + div {
+  border-left: 1px solid var(--line-soft);
+  align-self: stretch;
+}
+
+.profile-head h1 {
+  margin: 0;
+}
+
+.profile-head .profile-info {
+  align-items: flex-start;
+  text-align: left;
+}
+
+@media (max-width: 760px) {
+  .card.profile-head {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-head > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+}
+
+/* Risk prediction: with the model's evaluation hidden, the remaining chart takes the row. */
+.graph-grid.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.evaluation-toggle {
+  font-size: var(--t-sm);
+  white-space: nowrap;
+}
+
+/* Teachers: the opened section is scrolled to; keep it clear of the top edge. */
+.card.manage {
+  scroll-margin-top: var(--space-5);
+}
+
+.card.manage:focus {
+  outline: none;
+}
+
+/* On narrow screens the menu runs across the top; the logo would take a row of its own there. */
+@media (max-width: 880px) {
+  .sidebar-partner {
+    display: none;
+  }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SUBJECTS } from '@gradebook/domain/assessment';
 import { gql } from '../api/graphql.js';
 import {
@@ -69,6 +69,15 @@ function Manage({ teacher, classes, isSelf, run }) {
     setClassTeacherOf(teacher.class_teacher_of || '');
   }, [teacher]);
 
+  // Opening a teacher from the table brings their section into view. Keyed on the teacher, not the
+  // record, so saving a change does not scroll the page again.
+  const section = useRef(null);
+  useEffect(() => {
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    section.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    section.current?.focus({ preventScroll: true });
+  }, [teacher.teacher_id]);
+
   const byId = useMemo(() => new Map(classes.map((c) => [c.class_id, c])), [classes]);
   const open = classes.filter((c) => c.status === 'CURRENT');
   const isTeacher = teacher.role === 'Teacher';
@@ -103,7 +112,7 @@ function Manage({ teacher, classes, isSelf, run }) {
   }
 
   return (
-    <div className="card stack manage">
+    <div className="card stack manage" ref={section} tabIndex={-1}>
       <div className="weights-head">
         <h2>{fullName(teacher)}</h2>
         <span className="hint">{teacher.email} · {teacher.role} · {active ? 'Active' : 'Deactivated'}</span>

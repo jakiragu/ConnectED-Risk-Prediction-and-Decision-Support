@@ -438,42 +438,39 @@ export default function StudentProfile() {
       {view.fromDevice && <div className="notice">You are offline. This is the copy saved on this device at {new Date(view.savedAt).toLocaleString()}.</div>}
 
       <div className="card profile-head">
-        <h1>{p.student.first_name} {p.student.last_name}</h1>
-
-        <div className="profile-student-info profile-info">
-          <div>
-            Admission no: <b>{p.student.admission_no}</b>
+        <div className="profile-head-student">
+          <h1>{p.student.first_name} {p.student.last_name}</h1>
+          <div className="profile-info">
+            <div>Admission no: <b>{p.student.admission_no}</b></div>
+            <div>Class: <b>{p.student.class_name ?? '—'}</b></div>
           </div>
-          <div>
-            Class: <b>{p.student.class_name ?? '—'}</b>
-          </div>
+          {p.student.status === 'GRADUATED' && <b>Graduated{p.student.graduation_year ? ` ${p.student.graduation_year}` : ''}</b>}
+          {p.student.status === 'INACTIVE' && <b className="warn">Not active</b>}
+          {years.length > 1 && (
+            <label className="choice-inline">
+              School year{' '}
+              <select value={String(p.academic_year)} onChange={(e) => setYear(Number(e.target.value) === years[0] ? null : Number(e.target.value))}>
+                {years.map((y) => <option key={y} value={String(y)}>{y}</option>)}
+              </select>
+              {p.year_class_name && <span className="hint">in {p.year_class_name}</span>}
+            </label>
+          )}
         </div>
 
-        {p.student.status === 'GRADUATED' && <b>Graduated{p.student.graduation_year ? ` ${p.student.graduation_year}` : ''}</b>}
-        {p.student.status === 'INACTIVE' && <b className="warn">Not active</b>}
-        {years.length > 1 && (
-          <label className="choice-inline">
-            School year{' '}
-            <select value={String(p.academic_year)} onChange={(e) => setYear(Number(e.target.value) === years[0] ? null : Number(e.target.value))}>
-              {years.map((y) => <option key={y} value={String(y)}>{y}</option>)}
-            </select>
-            {p.year_class_name && <span className="hint">in {p.year_class_name}</span>}
-          </label>
-        )}
-        {active && !viewingPast && (
-          <Link className="btn primary" to={`/students/${studentId}/interventions`} state={{ from: backTo(location) }}>Log or update interventions</Link>
-        )}
-
-        <div className="profile-teaching-info profile-info">
-          <div>
-            Subjects taught:{' '}
-            <b>{p.teaching?.subjects?.length
-              ? p.teaching.subjects.join(', ')
-              : 'No subject assignments available'}</b>
+        <div className="profile-head-teaching">
+          <div className="profile-info">
+            <div>
+              Subjects taught:{' '}
+              <b>{p.teaching?.subjects?.length
+                ? p.teaching.subjects.join(', ')
+                : 'No subject assignments available'}</b>
+            </div>
+            {p.teaching?.isClassTeacher && (
+              <span className="pill good">Class teacher</span>
+            )}
           </div>
-
-          {p.teaching?.isClassTeacher && (
-            <span className="pill good">Class teacher</span>
+          {active && !viewingPast && (
+            <Link className="btn primary" to={`/students/${studentId}/interventions`} state={{ from: backTo(location), via: 'profile' }}>Log or update interventions</Link>
           )}
         </div>
       </div>

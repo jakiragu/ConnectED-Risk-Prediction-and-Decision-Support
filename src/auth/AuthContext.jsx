@@ -3,6 +3,7 @@ import { gql, setTokenProvider } from '../api/graphql.js';
 import { ME } from '../api/operations.js';
 import { openFor } from '../offline/db.js';
 import { refresh } from './cognito.jsx';
+import { resetSidebarGroups } from '../hooks/useSidebar.js';
 
 const AuthContext = createContext(null);
 const KEY = 'connected.session';
@@ -213,6 +214,7 @@ export function AuthProvider({ children }) {
       actor,
       isAdmin: Boolean(actor?.groups.includes('Admin')),
       signIn(tokens, rememberMe = false) {
+        resetSidebarGroups();
         save(tokens, rememberMe);
       },
       signOut() {
