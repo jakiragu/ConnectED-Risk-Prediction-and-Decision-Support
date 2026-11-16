@@ -1,4 +1,4 @@
-import { BatchWriteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { BatchGetCommand, BatchWriteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb } from './client.js';
 import { TABLE, pk, sk, gsi2 } from './keys.js';
 import { conflict } from './errors.js';
@@ -150,6 +150,27 @@ export function listForClass(schoolId, academicYear, point, classId, fields) {
     ...projection,
     ExpressionAttributeNames: { ...projection.ExpressionAttributeNames, '#class': 'class_id' },
   });
+}
+
+/**
+ * The predictions at one point of the given students, read by key. Use this rather than listForClass
+ * when the students are known: listForClass reads every prediction in the school at that point (a
+ * filter or projection does not reduce what DynamoDB charges for), this reads only these students'.
+ */
+export async function forStudents(schoolId, academicYear, point, studentIds) {
+  const out = [];
+  const ids = [...new Set(studentIds)].filter(Boolean);
+  for (let i = 0; i < ids.length; i += 100) {
+    let keys = ids.slice(i, i + 100).map((id) => ({ PK: pk(schoolId), SK: sk.risk(academicYear, point, id) }));
+    for (let attempt = 0; keys.length; attempt += 1) {
+      if (attempt === 8) throw new Error('DynamoDB kept throttling the predictions');
+      if (attempt) await new Promise((r) => setTimeout(r, Math.min(50 * 2 ** attempt, 1000)));
+      const res = await ddb.send(new BatchGetCommand({ RequestItems: { [TABLE]: { Keys: keys } } }));
+      out.push(...(res.Responses?.[TABLE] || []));
+      keys = res.UnprocessedKeys?.[TABLE]?.Keys || [];
+    }
+  }
+  return out;
 }
 
 export const listForStudent = async (schoolId, studentId, academicYear) =>

@@ -6,6 +6,8 @@ import * as platform from '../../library/platformRepo.js';
 import * as smsRecords from '../../library/resultSmsRepo.js';
 import { phoneHint, resultsSmsText, segments } from '../../library/resultsSms.js';
 import { readiness, sendSms } from '../../library/sms.js';
+import { languageFor } from '../../library/language.js';
+import * as languages from '../../library/languageRepo.js';
 
 /**
  * Telling parents a published result by SMS, from the Report cards page.
@@ -38,9 +40,12 @@ async function publishedScope(actor, input) {
   assertClassTeacherOrAdmin(actor, input.class_id);
   const set = await results.getSet(input.school_id, { termId: input.term_id, classId: input.class_id, checkpoint: input.checkpoint });
   if (set?.status !== results.STATUS.PUBLISHED) throw validation('These results are not published, so they cannot be sent to parents', 'checkpoint');
-  const [school, term] = await Promise.all([platform.school(input.school_id), platform.term(input.school_id, input.term_id)]);
+  const [school, term, languageSettings] = await Promise.all([
+    platform.school(input.school_id), platform.term(input.school_id, input.term_id), languages.get(input.school_id),
+  ]);
   return {
     set,
+    languageSettings,
     names: { schoolName: school?.name || 'School', className: klass.name, termName: term?.name || input.term_id },
   };
 }
@@ -63,7 +68,7 @@ export async function smsColumns(schoolId, set) {
 
 /** What a message will say, for the confirmation step: one student's text, or the first one who would be sent. */
 export async function previewResultsSms(actor, args) {
-  const { set, names } = await publishedScope(actor, args);
+  const { set, names, languageSettings } = await publishedScope(actor, args);
   const ids = args.student_id ? [args.student_id] : (set.student_ids || []);
   if (args.student_id && !(set.student_ids || []).includes(args.student_id)) throw notFound('This student has no result in this class');
   const students = await platform.studentsByIds(args.school_id, ids);
@@ -74,12 +79,14 @@ export async function previewResultsSms(actor, args) {
   if (!pick) return { student_id: null, student_name: null, text: null, segments: 0, ...ready };
   const row = await results.getRow(args.school_id, set, pick.student_id);
   if (!row) throw notFound('No published result for this student');
-  const text = resultsSmsText({ set, row, student: pick, ...names });
+  const language = languageFor(languageSettings, 'sms', pick);
+  const text = resultsSmsText({ set, row, student: pick, ...names, language });
   return {
     student_id: pick.student_id,
     student_name: `${pick.first_name} ${pick.last_name}`,
     text,
     segments: segments(text),
+    language,
     ...ready,
   };
 }
@@ -94,7 +101,7 @@ export async function previewResultsSms(actor, args) {
 export async function sendResultsSms(actor, input) {
   const ready = readiness();
   if (!ready.ready) throw validation(ready.problem);
-  const { set, names } = await publishedScope(actor, input);
+  const { set, names, languageSettings } = await publishedScope(actor, input);
 
   const inClass = new Set(set.student_ids || []);
   const chosen = input.student_ids?.length ? [...new Set(input.student_ids)] : [...inClass];
@@ -132,7 +139,7 @@ export async function sendResultsSms(actor, input) {
         outcome.already_sent += 1; // someone else is sending it, or just did
         continue;
       }
-      const text = resultsSmsText({ set, row: rows.get(student.student_id), student, ...names });
+      const text = resultsSmsText({ set, row: rows.get(student.student_id), student, ...names, language: languageFor(languageSettings, 'sms', student) });
       const result = await sendSms({ to: student.guardian_phone, text, kind: 'results' });
       await smsRecords.finish(input.school_id, set, student.student_id, actor, {
         ...result, to_hint: phoneHint(student.guardian_phone), segments: segments(text),

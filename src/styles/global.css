@@ -4875,3 +4875,32 @@ th .sort:focus-visible {
     display: none;
   }
 }
+
+/* Settings > School: language for parents */
+.language-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-5);
+}
+
+.language-choice {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.language-sample {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--ink);
+  background: var(--surface-alt);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: var(--t-sm);
+  color: var(--body);
+}
+
+.language-sample b {
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}

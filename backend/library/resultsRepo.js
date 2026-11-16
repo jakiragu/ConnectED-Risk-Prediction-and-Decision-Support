@@ -1,4 +1,5 @@
 import {
+  BatchGetCommand,
   BatchWriteCommand,
   GetCommand,
   PutCommand,
@@ -10,6 +11,7 @@ import { ddb } from './client.js';
 import { TABLE, pk, sk } from './keys.js';
 import { termOpen } from './assessmentRepo.js';
 import { CHECKPOINT, previousOf } from './results.js';
+import { digestOf, rowsOf } from './resultDigest.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -62,15 +64,16 @@ export const listSetsForClass = (schoolId, { termId, classId }) =>
     ConsistentRead: true,
   });
 
-export const listSetsForTerm = (schoolId, termId) =>
+/** consistent: false costs half; a set just changed may then show its previous state for about a second. */
+export const listSetsForTerm = (schoolId, termId, { consistent = true } = {}) =>
   queryAll({
     TableName: TABLE,
     KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
     ExpressionAttributeValues: { ':p': pk(schoolId), ':s': sk.resultSetTermPrefix(termId) },
-    ConsistentRead: true,
+    ConsistentRead: consistent,
   });
 
-export const listRows = (schoolId, set) =>
+export const listRows = (schoolId, set, { consistent = true } = {}) =>
   queryAll({
     TableName: TABLE,
     KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
@@ -78,8 +81,112 @@ export const listRows = (schoolId, set) =>
       ':p': pk(schoolId),
       ':s': sk.termResultPrefix(set.term_id, set.class_id, set.checkpoint, set.calculation_id),
     },
-    ConsistentRead: true,
+    ConsistentRead: consistent,
   });
+
+// ------------------------------------------------------------- result digests
+
+const digestKey = (schoolId, set) => ({
+  PK: pk(schoolId),
+  SK: sk.resultDigest(set.term_id, set.class_id, set.checkpoint, set.calculation_id),
+});
+
+/** Writes the digest of a published set (resultDigest.js). Idempotent: the same set always gives the same digest. */
+export async function putDigest(schoolId, set, rows) {
+  const digest = digestOf(set, rows);
+  await ddb.send(new PutCommand({
+    TableName: TABLE,
+    Item: { ...digestKey(schoolId, set), entity: 'ResultDigest', school_id: schoolId, created_at: nowIso(), ...digest },
+  }));
+  return digest;
+}
+
+/** Stored digests of these sets, as a Map from digest SK. Missing ones are simply absent. */
+async function readDigests(schoolId, sets) {
+  const out = new Map();
+  const keys = [...new Map(sets.map((s) => [digestKey(schoolId, s).SK, digestKey(schoolId, s)])).values()];
+  for (let i = 0; i < keys.length; i += 100) {
+    let pending = keys.slice(i, i + 100);
+    for (let attempt = 0; pending.length; attempt += 1) {
+      if (attempt === 8) throw new Error('DynamoDB kept throttling the result digests');
+      if (attempt) await new Promise((r) => setTimeout(r, Math.min(50 * 2 ** attempt, 1000)));
+      // Eventually consistent is safe: a digest never changes once written, and one not seen yet is rebuilt.
+      const res = await ddb.send(new BatchGetCommand({ RequestItems: { [TABLE]: { Keys: pending } } }));
+      for (const item of res.Responses?.[TABLE] || []) out.set(item.SK, item);
+      pending = res.UnprocessedKeys?.[TABLE]?.Keys || [];
+    }
+  }
+  return out;
+}
+
+/**
+ * A digest written before this existed is made from the full rows once, then stored. The rows were
+ * written before the set was calculated, let alone published, so a cheaper eventually consistent
+ * read already has them all; if it somehow does not, the count gives it away and they are re-read.
+ */
+async function buildDigest(schoolId, set) {
+  let rows = await listRows(schoolId, set, { consistent: false });
+  if (rows.length !== (set.student_ids || []).length) rows = await listRows(schoolId, set);
+  try {
+    return await putDigest(schoolId, set, rows);
+  } catch (e) {
+    console.log(JSON.stringify({ level: 'warn', msg: 'Result digest not stored; it is rebuilt on the next visit', set: set.SK, err: e.message }));
+    return digestOf(set, rows);
+  }
+}
+
+async function loadDigests(schoolId, sets) {
+  const stored = await readDigests(schoolId, sets);
+  const out = new Map();
+  const missing = [];
+  for (const set of sets) {
+    const item = stored.get(digestKey(schoolId, set).SK);
+    if (item) out.set(set, item);
+    else missing.push(set);
+  }
+  // A few at a time, so catching up on many old sets does not hit the table all at once.
+  for (let i = 0; i < missing.length; i += 4) {
+    const built = await Promise.all(missing.slice(i, i + 4).map((set) => buildDigest(schoolId, set)));
+    missing.slice(i, i + 4).forEach((set, j) => out.set(set, built[j]));
+  }
+  return out;
+}
+
+// Digests this running function has already read. A published set's digest never changes, so moving
+// between exams on the class page re-reads none of them. Bounded; the oldest entries go first.
+const digestCache = new Map();
+const DIGEST_CACHE_LIMIT = 2000;
+
+/**
+ * The rows of published sets, for pages that chart and compare results (classProfile.js), as a Map
+ * from set SK to rows rebuilt from each set's digest: no paper-by-paper detail. Not for report cards,
+ * SMS or anything that shows marks; read those from listRows.
+ */
+export async function publishedRows(schoolId, sets) {
+  for (const set of sets) {
+    if (set.status !== STATUS.PUBLISHED || !set.calculation_id) throw new Error(`${set.SK} is not published`);
+  }
+  const cacheKey = (set) => `${schoolId}|${digestKey(schoolId, set).SK}`;
+  const unique = [...new Map(sets.map((s) => [cacheKey(s), s])).values()];
+  const pending = unique.filter((s) => !digestCache.has(cacheKey(s)));
+  const digests = new Map(unique.map((s) => [cacheKey(s), digestCache.get(cacheKey(s))]));
+  if (pending.length) {
+    const loading = loadDigests(schoolId, pending);
+    for (const set of pending) {
+      const one = loading.then((m) => m.get(set));
+      one.catch(() => { if (digestCache.get(cacheKey(set)) === one) digestCache.delete(cacheKey(set)); }); // not remembered
+      digestCache.set(cacheKey(set), one);
+      digests.set(cacheKey(set), one);
+    }
+    for (const key of digestCache.keys()) {
+      if (digestCache.size <= DIGEST_CACHE_LIMIT) break;
+      digestCache.delete(key);
+    }
+  }
+  const out = new Map();
+  for (const set of sets) out.set(set.SK, rowsOf(await digests.get(cacheKey(set))));
+  return out;
+}
 
 export async function getRow(schoolId, set, studentId) {
   const { Item } = await ddb.send(

@@ -319,7 +319,7 @@ export const REQUEST_REPORT_CARD_DOWNLOAD = `
 export const PREVIEW_RESULTS_SMS = `
   query PreviewResultsSms($school_id: ID!, $class_id: ID!, $term_id: ID!, $checkpoint: Checkpoint!, $student_id: ID) {
     previewResultsSms(school_id: $school_id, class_id: $class_id, term_id: $term_id, checkpoint: $checkpoint, student_id: $student_id) {
-      student_id student_name text segments ready sandbox problem
+      student_id student_name text segments language ready sandbox problem
     }
   }`;
 
@@ -371,5 +371,19 @@ export const LIST_PAST_STUDENTS = `
   query ListPastStudents($school_id: ID!, $year: Int) {
     listPastStudents(school_id: $school_id, year: $year) {
       student_id admission_no first_name last_name status graduation_year left_year departure_kind deactivation_reason deactivation_date class_id class_name
+    }
+  }`;
+
+export const GET_LANGUAGE_SETTINGS = `
+  query GetLanguageSettings($school_id: ID!) {
+    getLanguageSettings(school_id: $school_id) {
+      school_id report_card_language sms_language is_default updated_at updated_by_name _version
+    }
+  }`;
+
+export const SAVE_LANGUAGE_SETTINGS = `
+  mutation SaveLanguageSettings($input: SaveLanguageSettingsInput!) {
+    saveLanguageSettings(input: $input) {
+      school_id report_card_language sms_language is_default updated_at updated_by_name _version
     }
   }`;

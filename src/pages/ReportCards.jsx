@@ -136,6 +136,7 @@ function SmsDialog({ ask, cards, scope, onClose, onSent }) {
               <span className="hint">
                 {preview.student_name && !one ? `as ${preview.student_name}’s parent sees it · ` : ''}
                 {plural(preview.segments, 'SMS', 'SMS')} per parent
+                {preview.language === 'sw' ? ' · in Kiswahili' : ''}
               </span>
             </div>
             <p className="sms-preview">{preview.text}</p>

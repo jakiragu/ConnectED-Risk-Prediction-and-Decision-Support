@@ -1,7 +1,8 @@
 import { notFound, validation } from '../../library/errors.js';
-import { renderPdf } from '../../library/pdf.js';
 import { checkpointsUpTo, reportCardModel } from '../../library/results.js';
-import { reportCardLines, reportKindOf, REPORT_KIND } from '../../library/reportCard.js';
+import { renderReportCard, reportKindOf } from '../../library/reportCard.js';
+import { languageFor } from '../../library/language.js';
+import * as languages from '../../library/languageRepo.js';
 import { reportKey, store } from '../../library/reportStore.js';
 import * as results from '../../library/resultsRepo.js';
 import * as platform from '../../library/platformRepo.js';
@@ -44,15 +45,22 @@ export async function generateOne(event) {
     else if (c === checkpoint) throw notFound(`No published result for ${student_id}`);
   }
 
-  const [student, klass, school, term] = await Promise.all([
+  const [student, klass, school, term, rule, languageSettings] = await Promise.all([
     platform.student(school_id, student_id),
     platform.klass(school_id, class_id),
     platform.school(school_id),
     platform.term(school_id, term_id),
+    platform.gradeRule(school_id, term_id),
+    languages.get(school_id),
   ]);
   const model = reportCardModel({ checkpoint, school, term, klass, student, entries });
   const kind = reportKindOf(model.kind);
-  const pdf = renderPdf(reportCardLines(model), { watermark: kind === REPORT_KIND.PROVISIONAL ? 'PROVISIONAL' : null });
+  // The term's pass mark cannot change once any of its results are published (setTermGrading), so this is
+  // the pass mark these results were published under.
+  const pdf = renderReportCard(model, {
+    language: languageFor(languageSettings, 'report_card', student),
+    passMark: Number.isFinite(rule?.pass_mark) ? rule.pass_mark : null,
+  });
 
   const key = reportKey({ school_id, term_id, class_id, checkpoint, student_id, calculation_id });
   const where = await store(key, pdf);

@@ -14,6 +14,7 @@ import CheckpointWeights from '../components/CheckpointWeights.jsx';
 import GradingSettings from '../components/GradingSettings.jsx';
 import ClassSetupSettings from '../components/ClassSetupSettings.jsx';
 import ImportSettings from '../components/ImportSettings.jsx';
+import LanguageSettings from '../components/LanguageSettings.jsx';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges.js';
 import Terms from './Terms.jsx';
 
@@ -25,7 +26,7 @@ import Terms from './Terms.jsx';
  * definition. Teachers see the rules read-only on each class page.
  */
 export const SECTIONS = [
-  { id: 'school', label: 'School', blurb: 'Your school’s details' },
+  { id: 'school', label: 'School', blurb: 'Your school’s details, language for parents' },
   { id: 'calendar', label: 'Calendar', blurb: 'Terms, dates and closures' },
   { id: 'classes', label: 'Classes', blurb: 'Forms and streams' },
   { id: 'exams', label: 'Exams and weights', blurb: 'Exam names, the Opener, how exams count' },
@@ -35,17 +36,20 @@ export const SECTIONS = [
   { id: 'import', label: 'Import from CSV', blurb: 'Students, assessments and marks from a file' },
 ];
 
-function SchoolSection() {
+function SchoolSection({ online, onDirty }) {
   const { schoolName, actor } = useAuth();
   return (
-    <div className="card settings-card">
-      <h2>School</h2>
-      <dl className="facts">
-        <dt>Name</dt><dd>{schoolName || '—'}</dd>
-        <dt>School ID</dt><dd><code>{actor.schoolId}</code></dd>
-        <dt>Who can change settings</dt><dd>Administrators</dd>
-      </dl>
-      <p className="hint">Angaza keeps your school’s name and location. To change them, contact Angaza.</p>
+    <div className="stack">
+      <div className="card settings-card">
+        <h2>School</h2>
+        <dl className="facts">
+          <dt>Name</dt><dd>{schoolName || '—'}</dd>
+          <dt>School ID</dt><dd><code>{actor.schoolId}</code></dd>
+          <dt>Who can change settings</dt><dd>Administrators</dd>
+        </dl>
+        <p className="hint">Angaza keeps your school’s name and location. To change them, contact Angaza.</p>
+      </div>
+      <LanguageSettings schoolId={actor.schoolId} online={online} onDirtyChange={onDirty} />
     </div>
   );
 }
@@ -190,7 +194,7 @@ export default function Settings() {
           ))}
         </nav>
         <section className="settings-body" aria-label={SECTIONS.find((s) => s.id === section)?.label}>
-          {section === 'school' && <SchoolSection />}
+          {section === 'school' && <SchoolSection online={online} onDirty={handlers.school} />}
           {section === 'calendar' && <Terms embedded />}
           {section === 'classes' && (
             <div className="stack">

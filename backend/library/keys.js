@@ -28,6 +28,7 @@ export const sk = {
   score: (assessmentId, studentId) => `SCORE#${assessmentId}#${studentId}`,
   gradeRule: (termId) => `GRADERULE#${termId}`,
   gradingPolicy: () => 'GRADEPOLICY#DEFAULT',
+  languageSettings: () => 'LANGUAGE#DEFAULT',
   classSetup: () => 'CLASSSETUP#SCHOOL',
   // Results are published per class, so the term lock is per class.
   termLock: (termId, classId) => `TERMLOCK#${termId}#CLASS#${classId}`,
@@ -41,6 +42,9 @@ export const sk = {
     `TERMRESULT#${termId}#CLASS#${classId}#${checkpoint}#${calculationId}#${studentId}`,
   termResultPrefix: (termId, classId, checkpoint, calculationId) =>
     `TERMRESULT#${termId}#CLASS#${classId}#${checkpoint}#${calculationId}#`,
+  // A published set in brief (resultDigest.js), under the calculation it summarises.
+  resultDigest: (termId, classId, checkpoint, calculationId) =>
+    `RESULTDIGEST#${termId}#CLASS#${classId}#${checkpoint}#${calculationId}`,
   reportCard: (termId, checkpoint, studentId) => `REPORTCARD#${termId}#${checkpoint}#${studentId}`,
   reportCardPrefix: (termId, checkpoint) => `REPORTCARD#${termId}#${checkpoint}#`,
   reportCardDownload: (ulid) => `RCDOWNLOAD#${ulid}`,

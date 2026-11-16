@@ -163,6 +163,7 @@ type ResultsSmsPreview {
   student_name: String
   text: String
   segments: Int!                   # SMS a message costs: 160 characters for one, 153 each when split
+  language: String                 # the language this message is written in (en, sw)
   ready: Boolean!                  # SMS is set up on this deployment
   sandbox: Boolean!                # messages go to a simulator or the local outbox, not to phones
   problem: String
@@ -335,6 +336,25 @@ type GradingPolicy {
 input GradeBandLowerInput {
   grade: String!
   min_score: Float!
+}
+
+# The language of what goes to parents: report cards and results SMS. ConnectED's own wording only;
+# names, subjects and grades stay as the school entered them. Codes: en (English), sw (Kiswahili).
+type LanguageSettings {
+  school_id: ID!
+  report_card_language: String!
+  sms_language: String!
+  is_default: Boolean!            # true: never saved, English for both
+  updated_at: AWSDateTime
+  updated_by_name: String
+  _version: Int!                  # 0 = never saved
+}
+
+input SaveLanguageSettingsInput {
+  school_id: ID!
+  report_card_language: String!
+  sms_language: String!
+  _version: Int!
 }
 
 input SaveGradingPolicyInput {
@@ -1833,6 +1853,7 @@ type Query {
   syncScores(school_id: ID!, class_id: ID!, lastSync: Float, limit: Int, nextToken: String): SyncPage_Score!
   getGradeRule(school_id: ID!, term_id: ID!): GradeRule
   getGradingPolicy(school_id: ID!): GradingPolicy!
+  getLanguageSettings(school_id: ID!): LanguageSettings!
   getClassSetup(school_id: ID!): ClassSetup!
   getGradingPreview(school_id: ID!): GradingPreview!                          # Admin
   getClassProfile(school_id: ID!, class_id: ID!, term_id: ID!, checkpoint: Checkpoint!): ClassProfile!
@@ -1881,6 +1902,7 @@ type Mutation {
   resolveScoreConflict(input: ResolveScoreConflictInput!): Score
   setCheckpointWeights(input: SetCheckpointWeightsInput!): GradeRule!      # Admin
   saveGradingPolicy(input: SaveGradingPolicyInput!): GradingPolicy!         # Admin
+  saveLanguageSettings(input: SaveLanguageSettingsInput!): LanguageSettings! # Admin
   saveClassSetup(input: SaveClassSetupInput!): ClassSetup!                  # Admin
   setTermGrading(input: SetTermGradingInput!): GradeRule!                   # Admin
   calculateTermResults(input: CalculateTermResultsInput!): ResultSet!      # Admin

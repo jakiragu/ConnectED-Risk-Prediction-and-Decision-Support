@@ -18,6 +18,8 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, s3 } from '../../library/client.js';
 import { TABLE, pk, sk } from '../../library/keys.js';
+import { LANGUAGE_NAME, isLanguage } from '../../library/language.js';
+import * as languageStore from '../../library/languageRepo.js';
 import { validation, notFound, locked, conflict } from '../../library/errors.js';
 import { ulid } from '../../library/ids.js';
 import {
@@ -84,6 +86,10 @@ export async function handler(event) {
       return getGradingPolicy(actor, args);
     case 'saveGradingPolicy':
       return saveGradingPolicy(actor, input);
+    case 'getLanguageSettings':
+      return getLanguageSettings(actor, args);
+    case 'saveLanguageSettings':
+      return saveLanguageSettings(actor, input);
     case 'setTermGrading':
       return setTermGrading(actor, input);
     case 'getGradingPreview':
@@ -316,6 +322,18 @@ async function ensureReports(schoolId, set) {
 }
 
 /**
+ * The published set in brief, for the class page (resultDigest.js). Written with the history, from the
+ * rows it has just read. Best effort: the class page makes any digest it cannot find.
+ */
+async function ensureDigest(schoolId, set, rows) {
+  try {
+    await results.putDigest(schoolId, set, rows);
+  } catch (e) {
+    log({ level: 'warn', msg: 'Result digest not written; the class page will make it', set: set.SK, err: e.message });
+  }
+}
+
+/**
  * Copies the published rows into each student's history (historyRepo). Runs
  * before ResultsPublished is sent, because consumers of the event read the
  * history. Idempotent; a failure is retried by publishing again.
@@ -325,6 +343,7 @@ async function ensureHistory(schoolId, set) {
   try {
     const [rows, term] = await Promise.all([results.listRows(schoolId, set), platform.term(schoolId, set.term_id)]);
     await history.writeHistory(schoolId, set, rows, term);
+    await ensureDigest(schoolId, set, rows);
     return { set: await history.markHistoryWritten(schoolId, set), ok: true };
   } catch (e) {
     log({ level: 'error', msg: 'Student history not written; publish again to retry', set: set.SK, err: e.message });
@@ -678,6 +697,41 @@ async function policyView(schoolId, policy) {
   };
 }
 
+async function languageView(schoolId, settings) {
+  return {
+    school_id: schoolId,
+    report_card_language: settings.report_card_language,
+    sms_language: settings.sms_language,
+    is_default: Boolean(settings.is_default),
+    updated_at: settings.updated_at ?? null,
+    updated_by_name: await teacherName(schoolId, settings.updated_by),
+    _version: settings._version ?? 0,
+  };
+}
+
+/** The language of report cards and results SMS. Readable by every gradebook role; only administrators change it. */
+async function getLanguageSettings(actor, { school_id }) {
+  assertTenant(actor, school_id);
+  assertGradebookRole(actor);
+  return languageView(school_id, await languageStore.get(school_id));
+}
+
+async function saveLanguageSettings(actor, input) {
+  assertTenant(actor, input.school_id);
+  assertAdmin(actor);
+  const allowed = Object.values(LANGUAGE_NAME).join(' or ');
+  if (!isLanguage(input.report_card_language)) throw validation(`Report cards can be in ${allowed}`, 'report_card_language');
+  if (!isLanguage(input.sms_language)) throw validation(`Results SMS can be in ${allowed}`, 'sms_language');
+  try {
+    const saved = await languageStore.save(input.school_id, input, input._version ?? 0, actor);
+    log({ op: 'saveLanguageSettings', report_card_language: saved.report_card_language, sms_language: saved.sms_language });
+    return languageView(input.school_id, saved);
+  } catch (e) {
+    if (e.name !== 'ConditionalCheckFailedException') throw e;
+    throw conflict('Someone else changed the language settings. Reload and try again.');
+  }
+}
+
 /** The school's default grading rules. Readable by every gradebook role; they explain how results are worked out. */
 async function getGradingPolicy(actor, { school_id }) {
   assertTenant(actor, school_id);
@@ -789,24 +843,35 @@ async function getClassProfile(actor, args) {
   const rScope = riskScope({ isAdmin: admin, isClassTeacher: classTeacher, subjects: subjects ?? [] });
 
   // Published results of this class, and of the whole school, for every exam this school year.
+  // This page is read on every move between exams, so it reads for a table with little capacity:
+  //  - the result sets eventually consistently (published sets never change; one published a moment
+  //    ago may appear a second later, except this class's chosen exam, read strongly above), and
+  //  - each set's digest rather than its full rows (resultDigest.js), cached by this function.
   const year = terms
     .filter((t) => Number(t.academic_year) === Number(term.academic_year))
     .sort((a, b) => a.term_number - b.term_number);
-  const setsByTerm = new Map(await Promise.all(year.map(async (t) => [t.term_id, (await results.listSetsForTerm(schoolId, t.term_id))
-    .filter((x) => x.status === results.STATUS.PUBLISHED)])));
-  const exams = [];
+  const setsByTerm = new Map(await Promise.all(year.map(async (t) => {
+    const sets = (await results.listSetsForTerm(schoolId, t.term_id, { consistent: false }))
+      .filter((x) => x.SK !== set?.SK)
+      .concat(t.term_id === scope.termId && set ? [set] : []);
+    return [t.term_id, sets.filter((x) => x.status === results.STATUS.PUBLISHED)];
+  })));
+  const wanted = [];
   for (const t of year) {
     for (const c of CHECKPOINTS) {
       const published = setsByTerm.get(t.term_id).filter((x) => x.checkpoint === c);
       const mine = published.find((x) => x.class_id === scope.classId);
-      if (!mine) continue;
-      const [classRows, schoolRows] = await Promise.all([
-        results.listRows(schoolId, mine),
-        Promise.all(published.map((x) => results.listRows(schoolId, x))).then((r) => r.flat()),
-      ]);
-      exams.push({ term: t, checkpoint: c, set: mine, classRows, schoolRows });
+      if (mine) wanted.push({ term: t, checkpoint: c, set: mine, published });
     }
   }
+  const rowsBySet = await results.publishedRows(schoolId, wanted.flatMap((w) => w.published));
+  const exams = wanted.map(({ term: t, checkpoint: c, set: mine, published }) => ({
+    term: t,
+    checkpoint: c,
+    set: mine,
+    classRows: rowsBySet.get(mine.SK),
+    schoolRows: published.flatMap((x) => rowsBySet.get(x.SK)),
+  }));
   // A current class's roster is who is in it now. An archived class's students have moved up or
   // graduated on it, so its roster is everyone its published results name, plus anyone still on it.
   const roster = (klass.status || 'CURRENT') === 'CURRENT'
@@ -838,7 +903,9 @@ async function getClassProfile(actor, args) {
     .filter((x) => x.point);
   const [predictionsByPoint, interventions] = rScope
     ? await Promise.all([
-      Promise.all(termPoints.map((x) => riskStore.listForClass(schoolId, term.academic_year, x.point, scope.classId))),
+      // By key for the students on the roster: a class query would read the whole school's predictions.
+      Promise.all(termPoints.map(async (x) => (await riskStore.forStudents(schoolId, term.academic_year, x.point, [...rosterIds]))
+        .filter((p) => p.class_id === scope.classId))),
       interventionStore.listForClass(schoolId, scope.classId),
     ])
     : [termPoints.map(() => []), []];
@@ -904,7 +971,8 @@ async function getClassProfile(actor, args) {
   const period = scope.checkpoint === CHECKPOINT.OPENER ? null : scope.checkpoint;
   if (full && period) {
     const days = attendancePeriods(term).find((p) => p.period === period)?.school_days ?? null;
-    const entries = (await attendanceStore.listPeriod(schoolId, scope.termId, period)).filter((e) => rosterIds.has(e.student_id));
+    const entries = (await attendanceStore.listPeriod(schoolId, scope.termId, period, { consistent: false }))
+      .filter((e) => rosterIds.has(e.student_id));
     attendance = new Map(entries.map((e) => [e.student_id, periodSummary(e, days ?? e.school_days_when_entered).percentage]));
   }
 

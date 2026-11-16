@@ -402,6 +402,8 @@ export function reportCardModel({ checkpoint, school, term, klass, student, entr
       };
     }),
     checkpoint_average: current.row.checkpoint_average,
+    // Each exam's mean so far, for the Mean row of the report card's table.
+    checkpoint_averages: Object.fromEntries(included.map((e) => [e.set.checkpoint, e.row.checkpoint_average ?? null])),
     term_average: kind === RESULT_KIND.FINAL ? current.row.term_average : null,
     term_grade: kind === RESULT_KIND.FINAL ? current.row.term_grade : null,
   };

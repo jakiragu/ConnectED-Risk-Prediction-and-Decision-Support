@@ -122,7 +122,9 @@ export async function seedPublishedHistory({ schoolId, terms, classIds, items, s
         for (const paper of await assessments.listAllLive(schoolId, classId, term.term_id)) {
           if (paper.published_in?.has(checkpoint)) await put({ ...paper, updated_at: publishedAt, _lastChangedAt: Date.parse(publishedAt) });
         }
-        await history.writeHistory(schoolId, set, await results.listRows(schoolId, set), term);
+        const publishedRows = await results.listRows(schoolId, set);
+        await history.writeHistory(schoolId, set, publishedRows, term);
+        await results.putDigest(schoolId, set, publishedRows); // as publishing does, for the class page
         await history.markHistoryWritten(schoolId, set);
         progress(
           `${classId} ${point}: calculation, publication and history took ${((Date.now() - calculationStartedAt) / 1000).toFixed(1)}s`

@@ -18,6 +18,7 @@
     "./targets": "./targets.js",
     "./decision": "./decisionSupport.js",
     "./grading": "./grading.js",
+    "./language": "./language.js",
     "./classProfile": "./classProfile.js",
     "./classSetup": "./classSetup.js",
     "./locations": "./locations.js",

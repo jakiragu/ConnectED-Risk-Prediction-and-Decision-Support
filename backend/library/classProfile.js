@@ -70,7 +70,8 @@ export function studentValue(row, checkpoint, subjects) {
   return vs.length ? vs.reduce((t, x) => t + x, 0) / vs.length : null;
 }
 
-const incompleteSubject = (s) => (s.absent_count || 0) + (s.missing_count || 0) + (s.not_assessed_count || 0) > 0;
+// Full rows carry the counts; rows rebuilt from a result digest (resultDigest.js) carry the answer.
+const incompleteSubject = (s) => s.incomplete ?? (s.absent_count || 0) + (s.missing_count || 0) + (s.not_assessed_count || 0) > 0;
 
 function bucketsFor(bands) {
   if (bands?.length) {

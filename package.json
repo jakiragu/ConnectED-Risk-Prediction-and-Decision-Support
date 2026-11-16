@@ -22,6 +22,7 @@
     "features:check": "node local/check-feature-contract.js",
     "features:export": "node local/export-features.js",
     "history:backfill": "node local/backfill-history.js",
+    "digests:backfill": "node local/backfill-result-digests.js",
     "model:package": "python ml/package_logreg.py",
     "model:publish": "node local/publish-model.js",
     "angaza:add-staff": "node local/add-angaza-staff.js",

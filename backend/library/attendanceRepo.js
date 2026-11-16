@@ -16,13 +16,13 @@ async function queryAll(params) {
   return out;
 }
 
-/** Every entry of one term's period (all classes). */
-export const listPeriod = (schoolId, termId, period) =>
+/** Every entry of one term's period (all classes). consistent: false costs half; an entry saved a moment ago may be missed. */
+export const listPeriod = (schoolId, termId, period, { consistent = true } = {}) =>
   queryAll({
     TableName: TABLE,
     KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
     ExpressionAttributeValues: { ':p': pk(schoolId), ':s': sk.attendancePeriodPrefix(termId, period) },
-    ConsistentRead: true,
+    ConsistentRead: consistent,
   });
 
 /** A student's entries for one school year, in calendar order. */

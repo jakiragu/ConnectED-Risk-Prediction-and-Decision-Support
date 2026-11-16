@@ -23,7 +23,9 @@ const base = {
 const at = (endpoint) => (endpoint ? { endpoint } : {});
 
 export const ddb = DynamoDBDocumentClient.from(
-  new DynamoDBClient({ ...base, ...at(process.env.DDB_ENDPOINT) }),
+  // A request DynamoDB throttles is retried with backoff; two more tries than the SDK's 3 ride out a
+  // short burst on the 5-unit table without holding a page for long (AppSync gives up at 30 s).
+  new DynamoDBClient({ ...base, maxAttempts: 5, ...at(process.env.DDB_ENDPOINT) }),
   { marshallOptions: { removeUndefinedValues: true } }
 );
 

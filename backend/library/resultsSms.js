@@ -1,4 +1,5 @@
-import { RESULT_KIND, labelOf } from './results.js';
+import { RESULT_KIND } from './results.js';
+import { examName, t } from './language.js';
 
 /**
  * The text of the SMS that tells a parent a student's published result.
@@ -63,10 +64,11 @@ const MAX_SEGMENTS = 2;
  * @param {string} p.schoolName
  * @param {string} p.className
  * @param {string} p.termName
+ * @param {string} [p.language]  'en' (default) or 'sw'; ConnectED's words only, names stay as entered
  */
-export function resultsSmsText({ set, row, student, schoolName, className, termName }) {
+export function resultsSmsText({ set, row, student, schoolName, className, termName, language = 'en' }) {
   const final = set.kind === RESULT_KIND.FINAL;
-  const label = labelOf(set.checkpoint, set.basis_labels || null);
+  const label = examName(language, set.checkpoint, set.basis_labels || null);
 
   const subjects = (row.subjects || [])
     .filter((s) => (final ? s.term?.term_score != null || s.papers?.length : s.papers?.length))
@@ -81,12 +83,14 @@ export function resultsSmsText({ set, row, student, schoolName, className, termN
     ? (row.term_average == null ? null : `${num(row.term_average)}${row.term_grade ? ` ${row.term_grade}` : ''}`)
     : (row.checkpoint_average == null ? null : `${num(row.checkpoint_average)}%`);
 
-  const head = `${schoolName}: ${termName} ${label} ${final ? 'results' : 'exam results'} for `
-    + `${student.first_name} ${student.last_name} (${student.admission_no}), ${className}.`;
-  const tail = 'Full report card from the school.';
+  const head = t(language, final ? 'sms.head.final' : 'sms.head.interim', {
+    school: schoolName, term: termName, label,
+    name: `${student.first_name} ${student.last_name}`, adm: student.admission_no, class: className,
+  });
+  const tail = t(language, 'sms.tail');
   const build = (name) => [
     head,
-    mean ? `Mean ${mean}.` : null,
+    mean ? t(language, 'sms.mean', { value: mean }) : null,
     subjects.length ? `${subjects.map((s) => `${name(s.subject)} ${s.value}`).join(', ')}.` : null,
     tail,
   ].filter(Boolean).join(' ');
