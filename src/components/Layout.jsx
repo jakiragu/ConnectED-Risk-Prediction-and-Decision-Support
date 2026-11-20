@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { db, dropFor } from '../offline/db.js';
@@ -6,10 +6,10 @@ import { useLive } from '../offline/useLive.js';
 import { getState, startSync } from '../offline/syncEngine.js';
 import SyncBar from './SyncBar.jsx';
 import GlobalSearch from './GlobalSearch.jsx';
-import { useSidebar, SIDEBAR } from '../hooks/useSidebar.js';
+import { useSidebar } from '../hooks/useSidebar.js';
+import SidebarFrame from './SidebarFrame.jsx';
 import { SCHOOL_SUSPENDED_EVENT } from '../api/graphql.js';
 import { describeRole } from '../roles.js';
-import angazaLogo from '../assets/angaza-center-logo.png';
 
 /**
  * Grouped by purpose rather than listed by feature. Every user: dashboard, classes, assessments, results.
@@ -200,41 +200,11 @@ export default function Layout() {
   }, []);
 
   // Sidebar: folding groups, hiding it, and dragging its edge to resize. Remembered on this device.
-  const { width, setWidth, hidden, setHidden, collapsed, setGroupOpen } = useSidebar();
-  const aside = useRef(null);
-  const activeGroup = NAV_GROUPS.find((g) => g.items.some((i) => i.to === activeSection))?.label;
-  // The group holding the current page always opens, so the highlighted link is never hidden.
-  useEffect(() => { if (activeGroup) setGroupOpen(activeGroup, true); }, [activeGroup, setGroupOpen]);
-
-  function startResize(e) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const left = aside.current.getBoundingClientRect().left;
-    const startX = e.clientX;
-    let dragged = false;
-    // A click without movement is not a resize (it would undo a double-click reset).
-    const move = (ev) => {
-      if (!dragged && Math.abs(ev.clientX - startX) < 3) return;
-      dragged = true;
-      setWidth(ev.clientX - left, false);
-    };
-    const end = (ev) => {
-      if (dragged) setWidth(ev.clientX - left, true);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      document.body.classList.remove('resizing');
-    };
-    document.body.classList.add('resizing');
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-  }
-  function resizeByKey(e) {
-    const step = e.shiftKey ? SIDEBAR.step * 3 : SIDEBAR.step;
-    if (e.key === 'ArrowLeft') { e.preventDefault(); setWidth(width - step); }
-    if (e.key === 'ArrowRight') { e.preventDefault(); setWidth(width + step); }
-    if (e.key === 'Home') { e.preventDefault(); setWidth(SIDEBAR.min); }
-    if (e.key === 'End') { e.preventDefault(); setWidth(SIDEBAR.max); }
-  }
+  const sidebar = useSidebar();
+  const { width, hidden, setHidden } = sidebar;
+  const groups = NAV_GROUPS
+    .map((g) => ({ label: g.label, items: g.items.filter((item) => !item.show || item.show({ isAdmin, isClassTeacher })) }))
+    .filter((g) => g.items.length);
 
   async function logOut(e) {
     e.preventDefault();
@@ -253,48 +223,7 @@ export default function Layout() {
   return (
     <div className={`shell${hidden ? ' nav-hidden' : ''}`} style={{ '--sidebar-w': `${width}px` }}>
       {!hidden && (
-        <aside className="sidebar" id="sidebar" ref={aside}>
-          <div className="brand">
-            <div className="brand-name">ConnectED</div>
-            <div className="brand-sub">Exam and Gradebook System</div>
-          </div>
-          <nav className="nav" aria-label="Main">
-            {NAV_GROUPS.map((group) => {
-              const items = group.items.filter((item) => !item.show || item.show({ isAdmin, isClassTeacher }));
-              if (!items.length) return null;
-              const open = !collapsed.has(group.label);
-              const id = `nav-group-${group.label.toLowerCase()}`;
-              return (
-                <div key={group.label} className={`nav-group${open ? ' open' : ''}`}>
-                  <button type="button" className="nav-group-toggle" aria-expanded={open} aria-controls={id}
-                    onClick={() => setGroupOpen(group.label, !open)}>
-                    <span>{group.label}</span>
-                    <svg className="chevron" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </button>
-                  {open && (
-                    <div id={id} className="nav-group-items">
-                      {items.map((item) => (
-                        <Link key={item.to} to={item.to} aria-current={activeSection === item.to ? 'page' : undefined}>
-                          {item.label}
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            <a href="#log-out" className="danger" onClick={logOut}>
-              Log out
-            </a>
-          </nav>
-          <div className="sidebar-partner">
-            <img src={angazaLogo} alt="Angaza Center" width="64" height="64" />
-          </div>
-          <div className="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the menu"
-            aria-valuemin={SIDEBAR.min} aria-valuemax={SIDEBAR.max} aria-valuenow={width} tabIndex={0}
-            title="Drag to resize. Double-click to reset." onPointerDown={startResize} onKeyDown={resizeByKey}
-            onDoubleClick={() => setWidth(SIDEBAR.default)} />
-        </aside>
+        <SidebarFrame subtitle="Exam and Gradebook System" groups={groups} activeSection={activeSection} sidebar={sidebar} onLogOut={logOut} />
       )}
 
       <div className="main">

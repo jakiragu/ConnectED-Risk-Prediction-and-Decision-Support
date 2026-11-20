@@ -1839,6 +1839,88 @@ input ResetSchoolAdminPasswordInput {
   teacher_id: ID!
 }
 
+
+enum GoogleLinkingPolicy {
+  NOBODY
+  TEACHERS
+  TEACHERS_AND_ADMINS
+}
+
+type SignInMethods {
+  password: Boolean!
+  google_linked: Boolean!
+  google_email: String
+  google_linked_at: AWSDateTime
+  confirmed: Boolean!
+  google_available: Boolean!
+  can_link: Boolean!
+  blocked_reason: String
+}
+
+type GoogleLinkStart {
+  url: String!
+  state: String!
+}
+
+type GoogleLinkResult {
+  signed_out: Boolean!
+  sign_in: SignInMethods!
+}
+
+type AccountPolicy {
+  school_id: ID!
+  google_linking: GoogleLinkingPolicy!
+  updated_at: AWSDateTime
+  _version: Int!
+}
+
+type AccountLink {
+  teacher_id: ID!
+  first_name: String
+  last_name: String
+  email: String!
+  role: String!
+  status: String!
+  google_linked: Boolean!
+  google_email: String
+  google_linked_at: AWSDateTime
+  confirmed: Boolean!
+}
+
+type StaffProfile {
+  staff_id: ID!
+  email: String!
+  first_name: String
+  last_name: String
+  status: String!
+  created_at: AWSDateTime
+  sign_in: SignInMethods!
+}
+
+input StartGoogleLinkInput {
+  school_id: ID!
+}
+
+input CompleteGoogleLinkInput {
+  school_id: ID!
+  id_token: String!
+}
+
+input RemoveGoogleLinkInput {
+  school_id: ID!
+  teacher_id: ID
+}
+
+input SaveAccountPolicyInput {
+  school_id: ID!
+  google_linking: GoogleLinkingPolicy!
+  _version: Int!
+}
+
+input CompleteStaffGoogleLinkInput {
+  id_token: String!
+}
+
 type Query {
   getAssessment(school_id: ID!, assessment_id: ID!): Assessment
   getAssessmentConfig(school_id: ID!): AssessmentConfig!
@@ -1887,6 +1969,10 @@ type Query {
 
   listSchools: [PlatformSchool!]!                                             # Angaza staff
   getSchool(school_id: ID!): PlatformSchoolDetail!                            # Angaza staff
+  getSignInMethods(school_id: ID!): SignInMethods!
+  getAccountPolicy(school_id: ID!): AccountPolicy!
+  listAccountLinks(school_id: ID!): [AccountLink!]!
+  getStaffProfile: StaffProfile!
 }
 
 type Mutation {
@@ -1934,6 +2020,13 @@ type Mutation {
   selectStudentTarget(input: SelectStudentTargetInput!): RiskTargets!
   saveIntervention(input: SaveInterventionInput!): Intervention!              # Admin | class teacher | subject teacher (own subjects)
   deleteIntervention(input: DeleteInterventionInput!): Intervention!
+  startGoogleLink(input: StartGoogleLinkInput!): GoogleLinkStart!
+  completeGoogleLink(input: CompleteGoogleLinkInput!): GoogleLinkResult!
+  removeGoogleLink(input: RemoveGoogleLinkInput!): GoogleLinkResult!
+  saveAccountPolicy(input: SaveAccountPolicyInput!): AccountPolicy!
+  startStaffGoogleLink: GoogleLinkStart!
+  completeStaffGoogleLink(input: CompleteStaffGoogleLinkInput!): GoogleLinkResult!
+  removeStaffGoogleLink: GoogleLinkResult!
   applyPromotion(input: ApplyPromotionInput!): PromotionRun!                  # Admin; resumable, idempotent
   revertPromotion(input: RevertPromotionInput!): PromotionRun!                # Admin; until the new year has records
 

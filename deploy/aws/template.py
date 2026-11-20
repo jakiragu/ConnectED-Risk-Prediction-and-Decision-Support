@@ -36,9 +36,11 @@ def make_template():
     mail=iff('UseSes',policy(['ses:SendEmail'],sub('arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*')),ref('AWS::NoValue'))
     site=sub('https://${Web.DomainName}')
     mail_env={'MAIL_FROM':ref('MailFrom'),'SITE_URL':site}
-    add('LinkRole','AWS::IAM::Role',{'AssumeRolePolicyDocument':trust('lambda.amazonaws.com'),'Policies':[{'PolicyName':'link-invited-users','PolicyDocument':{'Version':'2012-10-17','Statement':[logs,policy(['cognito-idp:ListUsers','cognito-idp:AdminListGroupsForUser','cognito-idp:AdminLinkProviderForUser'],sub('arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*')),mail]}}]})
+    add('LinkRole','AWS::IAM::Role',{'AssumeRolePolicyDocument':trust('lambda.amazonaws.com'),'Policies':[{'PolicyName':'link-invited-users','PolicyDocument':{'Version':'2012-10-17','Statement':[logs,policy(['cognito-idp:ListUsers','cognito-idp:AdminListGroupsForUser','cognito-idp:AdminLinkProviderForUser'],sub('arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*')),mail,
+        # The trigger reads the person's sign-in record (a removed link is not relinked) and records an automatic link.
+        policy(['dynamodb:GetItem','dynamodb:PutItem'],att('Table','Arn'))]}}]})
     add('LinkFunction','AWS::Lambda::Function',{'FunctionName':sub('${AWS::StackName}-google-link'),'Runtime':'nodejs22.x','Handler':'link.handler','Role':att('LinkRole','Arn'),
-        'Code':{'S3Bucket':ref('ArtifactBucket'),'S3Key':ref('CodeKey')},'Timeout':5,'MemorySize':256,'Environment':{'Variables':mail_env}})
+        'Code':{'S3Bucket':ref('ArtifactBucket'),'S3Key':ref('CodeKey')},'Timeout':5,'MemorySize':256,'Environment':{'Variables':{**mail_env,'GRADEBOOK_TABLE_NAME':ref('Table')}}})
     # Forgot-password wording and the "password changed" notice, for both pools (backend/lambdas/auth-mail).
     add('AuthMailRole','AWS::IAM::Role',{'AssumeRolePolicyDocument':trust('lambda.amazonaws.com'),'Policies':[{'PolicyName':'account-email','PolicyDocument':{'Version':'2012-10-17','Statement':[logs,mail]}}]})
     add('AuthMailFunction','AWS::Lambda::Function',{'FunctionName':sub('${AWS::StackName}-auth-mail'),'Runtime':'nodejs22.x','Handler':'authmail.handler','Role':att('AuthMailRole','Arn'),
@@ -58,7 +60,12 @@ def make_template():
         add(realm+'Domain','AWS::Cognito::UserPoolDomain',{'UserPoolId':ref(realm+'Pool'),'Domain':sub('${AWS::StackName}-${AWS::AccountId}-'+realm.lower()),'ManagedLoginVersion':1})
         add(realm+'Google','AWS::Cognito::UserPoolIdentityProvider',{'UserPoolId':ref(realm+'Pool'),'ProviderName':'Google','ProviderType':'Google',
             'ProviderDetails':{'client_id':ref('GoogleClientId'),'client_secret':ref('GoogleClientSecret'),'authorize_scopes':'openid email profile'},
-            'AttributeMapping':{'email':'email','email_verified':'email_verified','name':'name','custom:google_hd':'hd'}},Condition='UseGoogle')
+            # Google must never overwrite the account's own email, email_verified or name: Cognito copies every
+            # mapped attribute onto the linked account at each Google sign-in, and a linked personal Google
+            # account has a different address from the school email. So Google's address and verified flag
+            # go to two standard attributes nothing else uses (nickname, profile), which the pre-sign-up
+            # trigger reads. Standard attributes exist in every pool: no schema change, no pool replacement.
+            'AttributeMapping':{'nickname':'email','profile':'email_verified','custom:google_hd':'hd'}},Condition='UseGoogle')
         path='/auth/callback' if realm=='School' else '/angaza/auth/callback'
         logout='/sign-in' if realm=='School' else '/angaza/sign-in'
         add(realm+'Client','AWS::Cognito::UserPoolClient',{'UserPoolId':ref(realm+'Pool'),'ClientName':'web','GenerateSecret':False,
@@ -67,7 +74,7 @@ def make_template():
             'SupportedIdentityProviders':iff('UseGoogle',['COGNITO',ref(realm+'Google')],['COGNITO']),
             'CallbackURLs':[sub('https://${Web.DomainName}'+path)],'LogoutURLs':[sub('https://${Web.DomainName}'+logout)],
             'ReadAttributes':['email','email_verified','name']+(['custom:school_id'] if realm=='School' else []),
-            'WriteAttributes':['email','name','custom:google_hd'],
+            'WriteAttributes':['email','name','nickname','profile','custom:google_hd'],
             'EnableTokenRevocation':True,'RefreshTokenValidity':30,'AccessTokenValidity':60,'IdTokenValidity':60,
             'TokenValidityUnits':{'RefreshToken':'days','AccessToken':'minutes','IdToken':'minutes'}})
     for name,pool in [('Admin','School'),('Teacher','School'),('PlatformAdmin','Angaza')]:
@@ -79,14 +86,19 @@ def make_template():
         policy(['events:PutEvents'],att('Bus','Arn')),
         policy(['states:StartExecution'],sub('arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-reports')),
         policy(['lambda:InvokeFunction'],[sub('arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-prediction'),sub('arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-scorer')]),
-        policy(['cognito-idp:AdminCreateUser','cognito-idp:AdminGetUser','cognito-idp:AdminUpdateUserAttributes','cognito-idp:AdminAddUserToGroup','cognito-idp:AdminRemoveUserFromGroup','cognito-idp:AdminListGroupsForUser','cognito-idp:AdminDisableUser','cognito-idp:AdminEnableUser','cognito-idp:AdminSetUserPassword','cognito-idp:AdminResetUserPassword'],att('SchoolPool','Arn')),
+        policy(['cognito-idp:AdminCreateUser','cognito-idp:AdminGetUser','cognito-idp:AdminUpdateUserAttributes','cognito-idp:AdminAddUserToGroup','cognito-idp:AdminRemoveUserFromGroup','cognito-idp:AdminListGroupsForUser','cognito-idp:AdminDisableUser','cognito-idp:AdminEnableUser','cognito-idp:AdminSetUserPassword','cognito-idp:AdminResetUserPassword',
+            'cognito-idp:AdminLinkProviderForUser','cognito-idp:AdminDisableProviderForUser','cognito-idp:AdminUserGlobalSignOut'],att('SchoolPool','Arn')),
+        # Angaza staff link their own Google account from the console's My Profile; nothing else touches their pool.
+        policy(['cognito-idp:AdminGetUser','cognito-idp:AdminLinkProviderForUser','cognito-idp:AdminDisableProviderForUser','cognito-idp:AdminUserGlobalSignOut'],att('AngazaPool','Arn')),
         policy(['sqs:SendMessage'],att('FailureQueue','Arn')),mail]
     add('BackendRole','AWS::IAM::Role',{'AssumeRolePolicyDocument':trust('lambda.amazonaws.com'),'Policies':[{'PolicyName':'application-resources','PolicyDocument':{'Version':'2012-10-17','Statement':statements}}]})
     env={'GRADEBOOK_TABLE_NAME':ref('Table'),'REPORT_BUCKET':ref('ReportBucket'),'MODEL_BUCKET':ref('ModelBucket'),'EVENT_BUS_NAME':ref('Bus'),
         'COGNITO_USER_POOL_ID':ref('SchoolPool'),'PLATFORM_COGNITO_USER_POOL_ID':ref('AngazaPool'),
         'RISK_PREDICTION_FUNCTION':sub('${AWS::StackName}-prediction'),'RISK_SCORER_FUNCTION':sub('${AWS::StackName}-scorer'),
         'REPORT_STATE_MACHINE_ARN':sub('arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-reports'),
-        'SCHOOL_TIME_ZONE':'Africa/Nairobi',**mail_env}
+        'SCHOOL_TIME_ZONE':'Africa/Nairobi',
+        # Linking a Google account (My Profile): Google's signed answer must be for this client. Empty until the google phase.
+        'GOOGLE_CLIENT_ID':ref('GoogleClientId'),**mail_env}
     # Results by SMS (deploy.py sms): Africa's Talking, called over HTTPS by the API function only.
     sms_env={'AT_USERNAME':ref('AtUsername'),'AT_API_KEY':ref('AtApiKey'),'AT_SENDER_ID':ref('AtSenderId')}
     for n,handler,timeout,memory in [('Api','api',120,1024),('Prediction','prediction',900,1024),('Report','report',60,512)]:

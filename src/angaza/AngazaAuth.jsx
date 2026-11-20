@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '../api/graphql.js';
-import { ANGAZA_CLIENT_ID, refresh } from '../auth/cognito.jsx';
+import { ANGAZA_CLIENT_ID, refresh, signInWithPassword } from '../auth/cognito.jsx';
+import { setSignOutNotice } from '../auth/signOutNotice.js';
 
 /**
  * The Angaza console's session. It is kept apart from the school app's session
@@ -67,6 +68,13 @@ export function AngazaAuthProvider({ children }) {
     } catch {
       return s.idToken; // the server's answer is shown; the timer below signs out if needed
     }
+  }, {
+    // The API ended this person's sessions on purpose (their Google link was removed or changed).
+    onSessionEnded: (message) => {
+      if (!current.current) return;
+      setSignOutNotice('angaza', message);
+      save(null);
+    },
   }));
 
   // Renew a minute before expiry. If the Angaza pool refuses, the session has ended: sign out.
@@ -90,6 +98,12 @@ export function AngazaAuthProvider({ children }) {
       api,
       signIn: (tokens, remember = false) => save(tokens, remember),
       signOut: () => save(null),
+      /** A fresh sign-in with the password, for a sensitive change (see AuthContext.reauthenticate). */
+      reauthenticate: async (password) => {
+        const res = await signInWithPassword(staff.email, password, ANGAZA_CLIENT_ID);
+        if (!res.tokens) throw new Error('This account must choose a new password first. Log out and log in again.');
+        save(res.tokens);
+      },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);

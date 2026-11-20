@@ -15,6 +15,7 @@ import GradingSettings from '../components/GradingSettings.jsx';
 import ClassSetupSettings from '../components/ClassSetupSettings.jsx';
 import ImportSettings from '../components/ImportSettings.jsx';
 import LanguageSettings from '../components/LanguageSettings.jsx';
+import AccountSettings from '../components/AccountSettings.jsx';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges.js';
 import Terms from './Terms.jsx';
 
@@ -27,6 +28,7 @@ import Terms from './Terms.jsx';
  */
 export const SECTIONS = [
   { id: 'school', label: 'School', blurb: 'Your school’s details, language for parents' },
+  { id: 'accounts', label: 'Accounts', blurb: 'Who may log in with Google' },
   { id: 'calendar', label: 'Calendar', blurb: 'Terms, dates and closures' },
   { id: 'classes', label: 'Classes', blurb: 'Forms and streams' },
   { id: 'exams', label: 'Exams and weights', blurb: 'Exam names, the Opener, how exams count' },
@@ -195,6 +197,7 @@ export default function Settings() {
         </nav>
         <section className="settings-body" aria-label={SECTIONS.find((s) => s.id === section)?.label}>
           {section === 'school' && <SchoolSection online={online} onDirty={handlers.school} />}
+          {section === 'accounts' && <AccountSettings schoolId={actor.schoolId} onDirtyChange={handlers.accounts} />}
           {section === 'calendar' && <Terms embedded />}
           {section === 'classes' && (
             <div className="stack">

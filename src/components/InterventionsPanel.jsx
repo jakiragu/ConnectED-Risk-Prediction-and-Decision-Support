@@ -32,8 +32,40 @@ function Chevron({ open }) {
   );
 }
 
+/**
+ * The column headings and one row per intervention: what is being done, for which subject,
+ * how often, since when and who assigned it. Shared by this panel and the flagged-student
+ * details on the dashboard, so an intervention reads the same wherever it is listed.
+ */
+export function InterventionRows({ items }) {
+  return (
+    <>
+      <div className="intv-cols" aria-hidden="true">
+        <span>Intervention</span><span>Subject</span><span>How often</span><span>Since</span><span>Assigned by</span>
+      </div>
+      <ul className="intv-items">
+        {items.map((i) => (
+          <li key={i.intervention_id} className="intv-item">
+            <span className="intv-method">{i.method}</span>
+            <span>{i.factor}</span>
+            <span className={`intv-freq f-${i.frequency.toLowerCase()}`} title={FREQUENCY_LABEL[i.frequency]}>{SHORT_FREQUENCY[i.frequency]}</span>
+            <span className="intv-since"><span className="intv-k">Since </span>{day(i.started_on)}</span>
+            <span className={`intv-by${i.assigned_by_me ? ' me' : ''}`}>
+              <span className="intv-k">Assigned by </span>{i.assigned_by_me ? 'Me' : (i.created_by_name || 'Unknown teacher')}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/** Most frequent first, then by subject: the order both lists use. */
+export const byFrequencyThenSubject = (a, b) =>
+  FREQUENCIES.indexOf(a.frequency) - FREQUENCIES.indexOf(b.frequency) || a.factor.localeCompare(b.factor);
+
 /** "2 daily · 1 weekly" */
-const frequencyLine = (list) => FREQUENCIES
+export const frequencyLine = (list) => FREQUENCIES
   .map((f) => [f, list.filter((i) => i.frequency === f).length])
   .filter(([, n]) => n)
   .map(([f, n]) => `${n} ${SHORT_FREQUENCY[f].toLowerCase()}`)
@@ -233,22 +265,7 @@ export default function InterventionsPanel({ items, viewerIsClassTeacher }) {
                           </div>
                           {isOpen && (
                             <div id={listId} className="intv-detail">
-                              <div className="intv-cols" aria-hidden="true">
-                                <span>Intervention</span><span>Subject</span><span>How often</span><span>Since</span><span>Assigned by</span>
-                              </div>
-                              <ul className="intv-items">
-                                {g.items.map((i) => (
-                                  <li key={i.intervention_id} className="intv-item">
-                                    <span className="intv-method">{i.method}</span>
-                                    <span>{i.factor}</span>
-                                    <span className={`intv-freq f-${i.frequency.toLowerCase()}`} title={FREQUENCY_LABEL[i.frequency]}>{SHORT_FREQUENCY[i.frequency]}</span>
-                                    <span className="intv-since"><span className="intv-k">Since </span>{day(i.started_on)}</span>
-                                    <span className={`intv-by${i.assigned_by_me ? ' me' : ''}`}>
-                                      <span className="intv-k">Assigned by </span>{i.assigned_by_me ? 'Me' : (i.created_by_name || 'Unknown teacher')}
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
+                              <InterventionRows items={g.items} />
                             </div>
                           )}
                         </li>

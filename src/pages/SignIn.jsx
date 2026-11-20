@@ -1,13 +1,14 @@
 import { startGoogle } from '../auth/oauth.js';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { completeNewPassword, signInWithPassword, requestPasswordReset, confirmPasswordReset } from '../auth/cognito.jsx';
 import { Field } from '../components/Field.jsx';
 import chalkboard from '../assets/sign-in-chalkboard.webp';
+import { clearSignOutNotice, readSignOutNotice } from '../auth/signOutNotice.js';
 
 /** Google's four-colour "G", as Google's sign-in branding asks for it. */
-function GoogleLogo() {
+export function GoogleLogo() {
   return (
     <svg className="google-logo" width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
       <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
@@ -18,9 +19,27 @@ function GoogleLogo() {
   );
 }
 
+/** The school portal's sign-in. The Angaza console uses the same screen (src/angaza/ConsoleSignIn.jsx). */
 export default function SignIn() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  return (
+    <SignInScreen realm="school" subtitle="Exam and Gradebook System" emailPlaceholder="Enter school email address"
+      onSignedIn={(tokens, remember) => { signIn(tokens, remember); navigate('/dashboard'); }} />
+  );
+}
+
+/**
+ * One sign-in screen for both portals, so they cannot drift apart. They differ only in the line
+ * under the name, the sign-in pool (clientId; omitted for the school pool) and where signing in leads.
+ *
+ * @param {{ realm: 'school'|'angaza', subtitle: string, emailPlaceholder: string, clientId?: string,
+ *           wrongAccountHelp?: string, onSignedIn: (tokens: object, remember: boolean) => void }} props
+ */
+export function SignInScreen({ realm, subtitle, emailPlaceholder, clientId, wrongAccountHelp, onSignedIn }) {
+  // Why the person was signed out, if the app did it (their Google link was removed or changed). Shown once.
+  const [signedOutNotice] = useState(() => readSignOutNotice(realm));
+  useEffect(() => { clearSignOutNotice(realm); }, [realm]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
@@ -38,8 +57,7 @@ export default function SignIn() {
   const [googleNotice, setGoogleNotice] = useState(null);
 
   function finish(tokens) {
-    signIn(tokens, rememberMe);
-    navigate('/dashboard');
+    onSignedIn(tokens, rememberMe);
   }
 
   async function submit(e) {
@@ -50,7 +68,7 @@ export default function SignIn() {
 
       setBusy(true); setError(null);
       try {
-        await requestPasswordReset(resetEmail);
+        await requestPasswordReset(resetEmail, clientId);
         setResetNotice('If this account can recover by email, a code has been sent. Check your inbox and spam folder.');
         setResetStep('code');
       } catch (err) { setError(err.message); }
@@ -76,7 +94,7 @@ export default function SignIn() {
 
       setBusy(true); setError(null);
       try {
-        await confirmPasswordReset(resetEmail, resetCode, resetPassword);
+        await confirmPasswordReset(resetEmail, resetCode, resetPassword, clientId);
         setResetStep('complete');
       } catch (err) { setError(err.message); }
       finally { setBusy(false); }
@@ -88,10 +106,10 @@ export default function SignIn() {
     try {
       if (challenge) {
         if (newPassword !== confirm) throw new Error('The two passwords do not match');
-        finish((await completeNewPassword(email.trim().toLowerCase(), challenge.session, newPassword)).tokens);
+        finish((await completeNewPassword(email.trim().toLowerCase(), challenge.session, newPassword, clientId)).tokens);
         return;
       }
-      const res = await signInWithPassword(email.trim().toLowerCase(), password);
+      const res = await signInWithPassword(email.trim().toLowerCase(), password, clientId);
       if (res.challenge) setChallenge(res);
       else finish(res.tokens);
     } catch (err) {
@@ -109,14 +127,23 @@ export default function SignIn() {
           <div className="sign-in-brand">
             <p>Welcome back to</p>
             <div className="sign-in-name">ConnectED</div>
-            <div className="sign-in-sub">Exam and Gradebook System</div>
+            <div className="sign-in-sub">{subtitle}</div>
           </div>
         <div className="stack">
           {!resetStep && (
             <h2>{challenge ? 'Choose your own password.' : 'Fill out the following form to log in.'}</h2>
           )}
 
-          {error && <div className="error">{error}</div>}
+          {signedOutNotice && !error && !resetStep && !challenge && (
+            <div className="auth-notice" role="status">{signedOutNotice}</div>
+          )}
+
+          {error && (
+            <div className="error" role="alert">
+              {error}
+              {wrongAccountHelp && error === 'Incorrect email or password' && <div>{wrongAccountHelp}</div>}
+            </div>
+          )}
 
           {resetStep === 'email' ? (
           <>
@@ -259,7 +286,7 @@ export default function SignIn() {
         ) : !challenge ? (
             <>
               <Field label="Email" htmlFor="email">
-                <input id="email" type="email" autoComplete="username" placeholder="Enter school email address"
+                <input id="email" type="email" autoComplete="username" placeholder={emailPlaceholder}
                   value={email} onChange={(e) => setEmail(e.target.value)} required />
               </Field>
               <Field label="Password" htmlFor="password">
@@ -309,7 +336,7 @@ export default function SignIn() {
                   </div>
 
                   <button className="btn google-btn" type="button"
-                    onClick={() => startGoogle('school', rememberMe).catch(err => setGoogleNotice(err.message))}
+                    onClick={() => startGoogle(realm, rememberMe).catch(err => setGoogleNotice(err.message))}
                   >
                     <GoogleLogo />
                     Continue with Google

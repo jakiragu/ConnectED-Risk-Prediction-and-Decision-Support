@@ -1,5 +1,6 @@
 import { identityOf } from './authz.js';
-import { schoolSuspended, unauthorized } from './errors.js';
+import { schoolSuspended, sessionEnded, unauthorized } from './errors.js';
+import { SESSION_ENDED } from './sessions.js';
 import * as platform from './platformRepo.js';
 
 export async function resolveActor(event) {
@@ -14,12 +15,19 @@ export async function resolveActor(event) {
   }
   if (!teacher) throw unauthorized('This account is not registered at this school');
   if (teacher.status !== 'ACTIVE') throw unauthorized('This account has been deactivated');
+  // Sessions ended on purpose (a Google link was removed or changed): anything issued before that is refused.
+  if (teacher.sessions_ended_at && id.issuedAt && id.issuedAt < teacher.sessions_ended_at) {
+    throw sessionEnded(SESSION_ENDED[teacher.sessions_ended_reason] || SESSION_ENDED.DEFAULT);
+  }
   const role = teacher.role || teacher.groups?.[0];
   return {
     ...id,
     groups: role ? [role] : [],
     role,
     name: [teacher.first_name, teacher.last_name].filter(Boolean).join(' ') || id.email,
+    firstName: teacher.first_name || null,
+    // The account's own address, from the school's record: where security notices go.
+    email: teacher.email || id.email,
     access: {
       assignments: teacher.assignments || [],
       historicalClassTeacherOf: teacher.historical_class_teacher_of || [],

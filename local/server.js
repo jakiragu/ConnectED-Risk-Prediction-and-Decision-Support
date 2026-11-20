@@ -8,6 +8,7 @@ import { verifyIdToken } from './cognito-auth.js';
 import { RESOLVERS } from './resolvers.js';
 import { startLambdaEndpoint } from './lambda-endpoint.js';
 import { startEventBridgeEndpoint } from './eventbridge-endpoint.js';
+import { startGoogleStandIn } from './google-stand-in.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const typeDefs = readFileSync(join(here, '../graphql/schema/gradebook.graphql'), 'utf8');
@@ -65,3 +66,5 @@ createServer((req, res) => yoga(req, res)).listen(port, () => {
 
 startLambdaEndpoint(Number(process.env.LOCAL_LAMBDA_PORT || 4011));
 startEventBridgeEndpoint(Number(process.env.LOCAL_EVENTS_PORT || 4010));
+// Linking a Google account (My Profile) needs Google's account chooser; locally a stand-in plays it.
+if (process.env.GOOGLE_STANDIN_URL) startGoogleStandIn(Number(new URL(process.env.GOOGLE_STANDIN_URL).port || 4012));

@@ -22,8 +22,12 @@ export function identityOf(event) {
     groups: id.groups || claims['cognito:groups'] || [],
     email: claims.email,
     name: claims.name || claims.email,
+    ...sessionTimes(claims),
   };
 }
+
+/** When the person last proved who they are (auth_time) and when this token was issued, in seconds. */
+export const sessionTimes = (claims = {}) => ({ authTime: Number(claims.auth_time) || 0, issuedAt: Number(claims.iat) || 0 });
 
 export const hasRole = (actor, ...roles) => roles.some((r) => actor.groups.includes(r));
 export const isAdmin = (actor) => hasRole(actor, ROLE.ADMIN);

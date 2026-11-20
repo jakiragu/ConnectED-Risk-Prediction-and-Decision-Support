@@ -1,4 +1,5 @@
 import OAuthCallback from './auth/OAuthCallback.jsx';
+import GoogleLinkReturn from './auth/GoogleLinkReturn.jsx';
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext.jsx';
@@ -44,6 +45,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/auth/callback" element={<OAuthCallback />} />
+      <Route path="/auth/google-link" element={<GoogleLinkReturn />} />
       <Route path="/sign-in" element={<SignIn />} />
       <Route path="/angaza/*" element={
         <Suspense fallback={<main className="page"><p className="hint" role="status">Opening the Angaza console…</p></main>}>

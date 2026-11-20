@@ -7,6 +7,7 @@ import { handler as attendanceService } from '../backend/lambdas/attendance-serv
 import { handler as featureService } from '../backend/lambdas/feature-service/handler.js';
 import { handler as riskService } from '../backend/lambdas/risk-service/handler.js';
 import { handler as interventionService } from '../backend/lambdas/intervention-service/handler.js';
+import { handler as accountService } from '../backend/lambdas/account-service/handler.js';
 import { handler as platformService } from '../backend/lambdas/platform-service/handler.js';
 
 export const RESOLVERS = {
@@ -55,6 +56,10 @@ export const RESOLVERS = {
     listPastStudents: schoolService,
     listSchools: platformService,
     getSchool: platformService,
+    getSignInMethods: accountService,
+    getAccountPolicy: accountService,
+    listAccountLinks: accountService,
+    getStaffProfile: accountService,
   },
   Mutation: {
     createAssessment: assessmentService,
@@ -108,5 +113,12 @@ export const RESOLVERS = {
     selectStudentTarget: riskService,
     saveIntervention: interventionService,
     deleteIntervention: interventionService,
+    startGoogleLink: accountService,
+    completeGoogleLink: accountService,
+    removeGoogleLink: accountService,
+    saveAccountPolicy: accountService,
+    startStaffGoogleLink: accountService,
+    completeStaffGoogleLink: accountService,
+    removeStaffGoogleLink: accountService,
   },
 };

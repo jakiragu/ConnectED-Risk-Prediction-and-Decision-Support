@@ -132,6 +132,8 @@ def main():
             o=outputs()
             print('Register BOTH redirect URIs in one Google OAuth Web Application:')
             print(o['SchoolDomain']+'/oauth2/idpresponse');print(o['AngazaDomain']+'/oauth2/idpresponse')
+            print('and this THIRD one, used when someone links their own Google account from My Profile:')
+            print(o['SiteUrl']+'/auth/google-link')
             client_id=input('Google OAuth client ID: ').strip();secret=getpass.getpass('Google OAuth client secret (hidden): ').strip()
             if not client_id.endswith('.apps.googleusercontent.com') or not secret: raise RuntimeError('Missing or invalid Google OAuth credentials.')
             params.extend([{'ParameterKey':'GoogleClientId','ParameterValue':client_id},{'ParameterKey':'GoogleClientSecret','ParameterValue':secret}])
@@ -160,6 +162,8 @@ def main():
             run(['node','local/publish-model.js',a.model],env=appenv(o))
         web(o)
         print('\nSchool portal: '+o['SiteUrl']+'/sign-in\nAngaza portal: '+o['SiteUrl']+'/angaza')
+        if state.get('google_enabled'):
+            print('Linking a Google account from My Profile needs this address under Authorised redirect URIs in the Google OAuth client:\n  '+o['SiteUrl']+'/auth/google-link')
         if not state.get('google_enabled'): print('Google is not enabled yet. Complete Google Console setup, then run the google phase.')
         if not state.get('mail_from'): print('Email uses the Cognito default sender and the app does not email sign-in details yet. Run the mail phase (see deploy/aws/README.md).')
         return

@@ -5,6 +5,16 @@ const event = () => ({ triggerSource: 'PreSignUp_ExternalProvider', userPoolId: 
 const user = () => ({ Username: 'original-user-id', Enabled: true, UserStatus: 'CONFIRMED', Attributes: [
   { Name: 'email_verified', Value: 'true' }, { Name: 'custom:school_id', Value: 'school-1' },
 ] });
+const records = new Map();
+const claims = new Map();
+const store = {
+  realmOf: (pool, schoolId) => ({ pool, schoolId }),
+  signIn: async (_realm, sub) => records.get(sub) || null,
+  claimGoogle: async (_realm, googleSub, sub) => { if (claims.has(googleSub) && claims.get(googleSub) !== sub) return false; claims.set(googleSub, sub); return true; },
+  saveLinked: async (_realm, sub, link) => { records.set(sub, { google_sub: link.googleSub, google_email: link.googleEmail }); },
+  audit: async () => {},
+};
+test.beforeEach(() => { records.clear(); claims.clear(); });
 function mock(users = [user()], groups = ['Teacher']) {
   const calls=[];
   const handler=makeHandler(async command => {
@@ -12,7 +22,7 @@ function mock(users = [user()], groups = ['Teacher']) {
     if(command.constructor.name === 'ListUsersCommand') return { Users: users };
     if(command.constructor.name === 'AdminListGroupsForUserCommand') return { Groups: groups.map(GroupName => ({ GroupName })) };
     return {};
-  });
+  }, async () => ({ sent: true }), store);
   return {handler,calls};
 }
 test('links verified Google identity to original native subject without creating users or roles', async () => {
@@ -48,7 +58,7 @@ test('linking emails the account owner, in the right portal, without the Google 
   const sent = [];
   const u = user(); u.Attributes.push({ Name: 'name', Value: 'Mary Wanjiku' });
   const handler = makeHandler(async command => command.constructor.name === 'ListUsersCommand' ? { Users: [u] }
-    : command.constructor.name === 'AdminListGroupsForUserCommand' ? { Groups: [{ GroupName: 'Teacher' }] } : {}, async m => { sent.push(m); return { sent: true }; });
+    : command.constructor.name === 'AdminListGroupsForUserCommand' ? { Groups: [{ GroupName: 'Teacher' }] } : {}, async m => { sent.push(m); return { sent: true }; }, store);
   await handler(event());
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, 'teacher@gmail.com');
@@ -59,7 +69,7 @@ test('linking emails the account owner, in the right portal, without the Google 
 });
 test('a failing email never blocks the Google sign-in', async () => {
   const handler = makeHandler(async command => command.constructor.name === 'ListUsersCommand' ? { Users: [user()] }
-    : command.constructor.name === 'AdminListGroupsForUserCommand' ? { Groups: [{ GroupName: 'Teacher' }] } : {}, async () => { throw new Error('SES down'); });
+    : command.constructor.name === 'AdminListGroupsForUserCommand' ? { Groups: [{ GroupName: 'Teacher' }] } : {}, async () => { throw new Error('SES down'); }, store);
   const e = event(); assert.equal(await handler(e), e);
 });
 test('refused sign-ins send no email', async () => {
@@ -67,4 +77,29 @@ test('refused sign-ins send no email', async () => {
   const handler = makeHandler(async command => command.constructor.name === 'ListUsersCommand' ? { Users: [] } : {}, async m => { sent.push(m); });
   await assert.rejects(handler(event()));
   assert.equal(sent.length, 0);
+});
+
+test('Google address and verified flag are read from nickname and profile, the attributes the provider now maps to', async () => {
+  const e = event(); e.request.userAttributes = { nickname: 'teacher@gmail.com', profile: 'true' };
+  const { handler, calls } = mock(); await handler(e);
+  assert.equal(calls.at(-1).constructor.name, 'AdminLinkProviderForUserCommand');
+  assert.match(calls[0].input.Filter, /teacher@gmail\.com/);
+  assert.equal(records.get('original-user-id').google_email, 'teacher@gmail.com');
+});
+test('a removed link is not put back automatically: the matching Google sign-in is refused and nothing is linked', async () => {
+  const { handler, calls } = mock();
+  records.set('original-user-id', { auto_link_off: true });
+  await assert.rejects(handler(event()), /removed from this account/);
+  assert.ok(!calls.some(c => c.constructor.name === 'AdminLinkProviderForUserCommand'));
+});
+test('a Google account claimed by another ConnectED account is refused', async () => {
+  const { handler, calls } = mock();
+  claims.set('12345', 'someone-else');
+  await assert.rejects(handler(event()), /already linked to another/);
+  assert.ok(!calls.some(c => c.constructor.name === 'AdminLinkProviderForUserCommand'));
+});
+test('an unreadable link record refuses the sign-in rather than relinking blindly', async () => {
+  const failing = { ...store, signIn: async () => { throw new Error('down'); } };
+  const handler = makeHandler(async c => c.constructor.name === 'ListUsersCommand' ? { Users: [user()] } : { Groups: [{ GroupName: 'Teacher' }] }, async () => ({}), failing);
+  await assert.rejects(handler(event()), /unavailable right now/);
 });

@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { gql, setTokenProvider } from '../api/graphql.js';
+import { gql, setSessionEndedHandler, setTokenProvider } from '../api/graphql.js';
 import { ME } from '../api/operations.js';
 import { openFor } from '../offline/db.js';
-import { refresh } from './cognito.jsx';
+import { refresh, signInWithPassword } from './cognito.jsx';
+import { setSignOutNotice } from './signOutNotice.js';
 import { resetSidebarGroups } from '../hooks/useSidebar.js';
 
 const AuthContext = createContext(null);
@@ -106,6 +107,18 @@ export function AuthProvider({ children }) {
       return s.idToken;
     }
   }));
+
+  // The API ended this person's sessions on purpose (their Google link was removed or changed):
+  // sign out here too, and let the sign-in page say why.
+  useEffect(() => {
+    setSessionEndedHandler((message) => {
+      if (!current.current) return;
+      setSignOutNotice('school', message);
+      save(null);
+    });
+    return () => setSessionEndedHandler(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Renew a minute before expiry; if Cognito refuses (revoked or deactivated) sign out.
   useEffect(() => {
@@ -219,6 +232,15 @@ export function AuthProvider({ children }) {
       },
       signOut() {
         save(null);
+      },
+      /**
+       * Proves again that the person at the keyboard owns the account, for a sensitive change
+       * (linking or removing a way to sign in). The session continues with the new, fresh token.
+       */
+      async reauthenticate(password) {
+        const res = await signInWithPassword(actor.email, password);
+        if (!res.tokens) throw new Error('This account must choose a new password first. Log out and log in again.');
+        save(res.tokens);
       },
       profile,
       displayName:

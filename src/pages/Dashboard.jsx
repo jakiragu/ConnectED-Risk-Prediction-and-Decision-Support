@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { targetText } from '@gradebook/domain/targets';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { ActionIcon, Checkbox, Sparkline } from '../components/ui.jsx';
-import InterventionsPanel from '../components/InterventionsPanel.jsx';
+import InterventionsPanel, { InterventionRows, byFrequencyThenSubject, frequencyLine } from '../components/InterventionsPanel.jsx';
 import { Skeleton } from '../components/insights.jsx';
 import { db } from '../offline/db.js';
 import { repository } from '../offline/repository.js';
@@ -87,6 +87,18 @@ export default function Dashboard() {
   }, [query, students]);
 
   const d = view.data;
+
+  // The same interventions the panel above lists (already limited to what this person may see),
+  // by student, so a flagged student's details show subject, frequency, start date and who assigned each.
+  const ongoingByStudent = useMemo(() => {
+    const map = new Map();
+    for (const i of d?.ongoing_interventions || []) {
+      if (!map.has(i.student_id)) map.set(i.student_id, []);
+      map.get(i.student_id).push(i);
+    }
+    for (const list of map.values()) list.sort(byFrequencyThenSubject);
+    return map;
+  }, [d]);
 
   const flaggedStudents = useMemo(() => {
     const q = riskQuery.trim().toLowerCase();
@@ -254,6 +266,7 @@ export default function Dashboard() {
                       const isOpen = expandedStudent === id;
 
                       const isPicked = picked.has(id);
+                      const ongoing = ongoingByStudent.get(id) || [];
 
                       return (
                         <Fragment key={id}>
@@ -318,7 +331,16 @@ export default function Dashboard() {
                                   <div className="stack">
                                     <h3 className="sub">Ongoing interventions</h3>
 
-                                    {c.interventions.length > 0 ? (
+                                    {ongoing.length > 0 ? (
+                                      <>
+                                        <span className="hint">
+                                          {ongoing.length} {ongoing.length === 1 ? 'intervention' : 'interventions'} · {frequencyLine(ongoing)}
+                                        </span>
+                                        <div className="intv-detail risk-interventions">
+                                          <InterventionRows items={ongoing} />
+                                        </div>
+                                      </>
+                                    ) : c.interventions.length > 0 ? (
                                       <ul className="plain">
                                         {c.interventions.map((method, i) => (
                                           <li key={`${method}-${i}`}>{method}</li>

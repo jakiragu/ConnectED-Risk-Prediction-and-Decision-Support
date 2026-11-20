@@ -3577,16 +3577,16 @@ th .sort:focus-visible {
   font-size: var(--t-base);
 }
 
-:where(.console) .consequences {
+.consequences {
   font-size: var(--t-sm);
 }
 
-:where(.console) .consequences li {
+.consequences li {
   padding-left: var(--space-4);
   position: relative;
 }
 
-:where(.console) .consequences li::before {
+.consequences li::before {
   content: '';
   position: absolute;
   left: 0;
@@ -4423,7 +4423,7 @@ th .sort:focus-visible {
 }
 
 /* What an import file should look like: open until a file is chosen, then folded away. */
-.column-guide > summary {
+.column-guide>summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4432,11 +4432,11 @@ th .sort:focus-visible {
   list-style: none;
 }
 
-.column-guide > summary::-webkit-details-marker {
+.column-guide>summary::-webkit-details-marker {
   display: none;
 }
 
-.column-guide > summary::after {
+.column-guide>summary::after {
   content: '';
   width: 8px;
   height: 8px;
@@ -4446,7 +4446,7 @@ th .sort:focus-visible {
   margin-right: var(--space-2);
 }
 
-.column-guide[open] > summary::after {
+.column-guide[open]>summary::after {
   transform: rotate(-135deg);
 }
 
@@ -4561,7 +4561,7 @@ th .sort:focus-visible {
   padding: var(--space-7) clamp(var(--space-6), 4vw, 3.5rem);
 }
 
-.sign-in-form > .stack {
+.sign-in-form>.stack {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -4610,7 +4610,7 @@ th .sort:focus-visible {
   border-color: var(--body);
 }
 
-.sign-in-form .field > label {
+.sign-in-form .field>label {
   font-size: var(--t-base);
   color: var(--body);
 }
@@ -4720,8 +4720,36 @@ th .sort:focus-visible {
 
 .sidebar-partner img {
   display: block;
-  width: 64px;
+  width: 100%;
+  max-width: 190px;
   height: auto;
+}
+
+/* The sidebar's product name in the sign-in page's typeface (Fraunces, Cooper Black where it is installed). */
+.sidebar .brand-name,
+.sidebar .brand-sub {
+  font-family: 'Fraunces', 'Cooper Black', Georgia, serif;
+  font-weight: 900;
+  font-variation-settings: 'SOFT' 100, 'opsz' 144;
+}
+
+.sidebar .brand-name {
+  font-size: 2.1rem;
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+}
+
+.sidebar .brand-sub {
+  margin-top: var(--space-1);
+  font-size: 0.84rem;
+}
+
+/* A flagged student's interventions on the dashboard: the panel's rows, framed as their own small table. */
+.risk-interventions {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
 }
 
 /* ======================================================================
@@ -4784,7 +4812,7 @@ th .sort:focus-visible {
   box-shadow: 0 8px 22px rgba(10, 76, 85, 0.14);
 }
 
-.find-popup > .hint {
+.find-popup>.hint {
   display: block;
   padding: var(--space-3) 0;
 }
@@ -4803,7 +4831,7 @@ th .sort:focus-visible {
 /* ======================================================================
    Student profile header: who the student is | what you teach them
    ====================================================================== */
-.stack > .back {
+.stack>.back {
   align-self: flex-start;
 }
 
@@ -4817,7 +4845,7 @@ th .sort:focus-visible {
   padding: 0;
 }
 
-.profile-head > div {
+.profile-head>div {
   display: grid;
   justify-items: start;
   align-content: start;
@@ -4825,7 +4853,7 @@ th .sort:focus-visible {
   padding: var(--space-5);
 }
 
-.profile-head > div + div {
+.profile-head>div+div {
   border-left: 1px solid var(--line-soft);
   align-self: stretch;
 }
@@ -4844,7 +4872,7 @@ th .sort:focus-visible {
     grid-template-columns: 1fr;
   }
 
-  .profile-head > div + div {
+  .profile-head>div+div {
     border-left: 0;
     border-top: 1px solid var(--line-soft);
   }
@@ -4903,4 +4931,65 @@ th .sort:focus-visible {
 .language-sample b {
   color: var(--ink);
   letter-spacing: 0.02em;
+}
+
+/* ======================================================================
+   Sign-in methods (My Profile, Angaza console profile): one row per way to log in,
+   with its state as a pill and its actions on the right.
+   ====================================================================== */
+.signin-methods {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.signin-method {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(13.5rem, auto);
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface);
+}
+
+.signin-method+.signin-method {
+  border-top: 1px solid var(--line-soft);
+}
+
+.signin-method-what {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.signin-method-what b {
+  color: var(--ink);
+}
+
+.signin-method-what .hint {
+  overflow-wrap: anywhere;
+}
+
+.signin-method-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+@media (max-width: 720px) {
+  .signin-method {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .signin-method-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .signin-method-actions:empty {
+    display: none;
+  }
 }

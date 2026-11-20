@@ -136,6 +136,7 @@ In https://console.cloud.google.com/ :
 
    - `SchoolDomain/oauth2/idpresponse`
    - `AngazaDomain/oauth2/idpresponse`
+   - `SiteUrl/auth/google-link` (your CloudFront address; used when someone links their own Google account from My Profile)
 
    Replace the output labels with their complete `https://...amazoncognito.com` values. These are **not** your CloudFront callback URLs. The CloudFormation client config already sets the app callbacks separately at `SiteUrl/auth/callback` and `SiteUrl/angaza/auth/callback`.
 8. Save the client ID and client secret securely.
@@ -146,7 +147,7 @@ Then run:
 python deploy/aws/deploy.py google
 ```
 
-The script prints the two exact Google redirect URIs again, prompts for the client ID and hidden secret, and updates both pool providers and both app clients. It uses a CloudFormation `NoEcho` parameter and deletes its temporary parameter file. Neither secret is written to the browser configuration. Later `deploy` runs preserve the existing Google parameters.
+The script prints the three exact Google redirect URIs again, prompts for the client ID and hidden secret, and updates both pool providers and both app clients. It uses a CloudFormation `NoEcho` parameter and deletes its temporary parameter file. Neither secret is written to the browser configuration. Later `deploy` runs preserve the existing Google parameters.
 
 Google account-linking rules in this patch:
 
@@ -169,6 +170,30 @@ Until the mail phase below has run, the reset code comes from Cognito's default 
 
 Remember me was already implemented: checked uses localStorage; unchecked uses sessionStorage. The new OAuth flow preserves that choice. Both portals retain separate keys. Browser session restoration can sometimes restore sessionStorage tabs; this is not a strong shared-computer security boundary. Sign out explicitly on shared devices. App logout clears the app's session; it does not sign the person out of their Google account or implement global token revocation.
 
+## Linking a personal Google account
+
+A person can link **one** personal Google account (say `janedoe@gmail.com`) to their school-issued account from **My Profile → Sign-in Methods**, then use "Continue with Google". Both ways in open the same account. Angaza staff do the same from the console's My Profile.
+
+**Nothing changes when you deploy this.** Every school starts at *Nobody*. A school administrator turns it on in **Settings → Accounts** (teachers only, or teachers and administrators), sees everyone's link there, and can remove any link. Automatic linking, where the Google address equals the account email, keeps working as before for anyone who has not removed their link.
+
+What the deployment changes, all in place (no pool or table is replaced, and existing records need no migration):
+
+- **Attribute mapping.** The Google provider no longer maps onto `email`, `email_verified` or `name`, so a Google sign-in cannot overwrite the school email or name. Google's address and verified flag now arrive in the standard attributes `nickname` and `profile`, which only the pre-sign-up trigger reads. No custom attribute is added.
+- **Permissions.** The API may link and unlink identities and end sessions in both pools; the trigger may read and write one sign-in record in the table.
+- **Google client.** Add `SiteUrl/auth/google-link` to the OAuth client's Authorised redirect URIs (step 7 above). `deploy.py` prints the exact address after `deploy` and during `google`. Until it is added, Google shows `redirect_uri_mismatch` when someone tries to link.
+
+How it is kept safe: the server checks Google's signed answer itself (genuine, for this client, unexpired, and answering that person's single-use request). It links Google's permanent account id; the address is display only. Linking, changing, removing, and widening the school's setting need a sign-in from the last ten minutes, or the app asks for the password again. Removing or changing a link ends the person's sessions and emails their account address. The API refuses their earlier sessions at once; a page already open on a device that stays offline can remain visible until it next talks to the server, and Cognito's own tokens last up to an hour. Every link, change, removal and setting change is written as an `ACCOUNTAUDIT#` record in the school's partition (the Angaza partition for staff).
+
+**Check after deploying, in this order** (these need real Cognito and Google, so they are not covered by the automated tests):
+
+1. An account whose email is a Google address still signs in with "Continue with Google", and its email and name on My Profile are unchanged afterwards.
+2. Set Settings → Accounts to *Teachers and administrators*, link a different Gmail address from My Profile, log out, and sign in with that Google account: the same account opens.
+3. Remove the link, then try "Continue with Google" with it: refused. For an account whose Google address equals its email, the refusal says the link was removed and to link again from My Profile.
+
+**Demo reset.** A reset restores database records only: the school's setting and the "do not relink automatically" markers go back to the snapshot, while links in Cognito stay. The app follows Cognito for whether a link exists (a link made after the snapshot shows as linked, without its address, and can still be removed). Take a new snapshot after choosing the setting, or each reset returns the school to *Nobody*.
+
+**Locally** there is no Google: `npm run api` starts a stand-in account chooser on `GOOGLE_STANDIN_URL` (see `.env.example`), and links are kept in the local table because cognito-local cannot link identities.
+
 ## Account emails (SES)
 
 ConnectED emails people when their account changes:
@@ -180,7 +205,9 @@ ConnectED emails people when their account changes:
 | Reset for someone who has signed in | "Your password was reset", with a temporary password | API |
 | Forgot password | Reset code in ConnectED's wording | Cognito (wording from the `auth-mail` trigger) |
 | Forgot-password reset finished | "Your password was changed" | `auth-mail` trigger |
-| Google linked to an account | "Google sign-in was added" | `google-link` trigger |
+| Google linked automatically at sign-in (Google address equals the account email) | "Google sign-in was added" | `google-link` trigger |
+| Someone links or changes a Google account from My Profile | "Google sign-in was added" / "The Google account was changed", naming the Google account, to the account's own address | API |
+| A Google link is removed (by the person, or by an administrator, who is named) | "Google sign-in was removed" | API |
 | School suspended or reactivated | Notice to its active administrators (never Angaza's reason) | API |
 
 A failed email never undoes the account change. The app shows the administrator the temporary password and why the email failed, so they can pass it on themselves. Until a sender is set up, nothing is emailed and every handover works that way.

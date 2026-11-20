@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { gql } from '../api/graphql.js';
 import { ME, LIST_MY_CLASSES, UPDATE_MY_PROFILE, } from '../api/operations.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { Field } from '../components/Field.jsx';
 import { useSync } from '../offline/useSync.js';
 import { classLabels } from '../classLabels.js';
+import { GET_SIGN_IN_METHODS, REMOVE_GOOGLE_LINK, START_GOOGLE_LINK } from '../api/accountOperations.js';
+import SignInMethods from '../components/SignInMethods.jsx';
+import { setSignOutNotice } from '../auth/signOutNotice.js';
+
+const REMOVED = 'You were logged out because Google sign-in was removed from your account. Log in with your password.';
 
 const formatDate = (value) => {
   if (!value) return '—';
@@ -22,7 +28,10 @@ const fullName = (person) =>
     .join(' ');
 
 export default function Profile() {
-  const { actor, isAdmin, updateUserProfile  } = useAuth();
+  const { actor, isAdmin, updateUserProfile, reauthenticate, signOut } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [methods, setMethods] = useState(null);
   const { online } = useSync();
 
   const [profile, setProfile] = useState(null);
@@ -52,6 +61,10 @@ export default function Profile() {
 
         setProfile(me);
         setClasses(listMyClasses || []);
+        // Its own request: a problem with sign-in methods must not hide the rest of the profile.
+        gql(GET_SIGN_IN_METHODS, { school_id: actor.schoolId })
+          .then(({ getSignInMethods }) => { if (active) setMethods(getSignInMethods); })
+          .catch(() => {});
         setFirstName(me.first_name || '');
         setLastName(me.last_name || '');
       } catch (e) {
@@ -131,6 +144,17 @@ export default function Profile() {
       setSaving(false);
     }
   }
+
+  // Back from Google with the account linked (GoogleLinkReturn): say so once.
+  useEffect(() => {
+    const linked = location.state?.googleLinked;
+    if (!linked) return;
+    setNotice(typeof linked === 'string'
+      ? `${linked} is now linked. You can log in with “Continue with Google”. We emailed ${actor.email} about it.`
+      : `Your Google account is now linked. We emailed ${actor.email} about it.`);
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   function cancelChanges() {
     setFirstName(profile?.first_name || '');
@@ -316,6 +340,20 @@ export default function Profile() {
           </div>
         </div>
       </section>
+
+      {methods && (
+        <SignInMethods
+          methods={methods}
+          accountEmail={profile.email}
+          realm="school"
+          online={online}
+          start={async () => (await gql(START_GOOGLE_LINK, { input: { school_id: actor.schoolId } })).startGoogleLink}
+          remove={async () => (await gql(REMOVE_GOOGLE_LINK, { input: { school_id: actor.schoolId } })).removeGoogleLink}
+          reauthenticate={reauthenticate}
+          onSignedOut={() => { setSignOutNotice('school', REMOVED); signOut(); }}
+          adminHint={isAdmin ? <Link to="/settings/accounts">Open Accounts settings</Link> : null}
+        />
+      )}
 
       {!isAdmin && (
         <>

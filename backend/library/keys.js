@@ -79,7 +79,23 @@ export const sk = {
   promotionRunPrefix: () => 'PROMOTION#',
   promotionMove: (runId, studentId) => `PROMOTIONMOVE#${runId}#${studentId}`,
   promotionMovePrefix: (runId) => `PROMOTIONMOVE#${runId}#`,
+  // Sign-in methods (accountLinkRepo.js). The school's choice of who may link a personal Google account;
+  // one record per person saying which Google account is linked (or that a link was removed on purpose);
+  // the person's one pending link request; and who changed what.
+  accountPolicy: () => 'ACCOUNTPOLICY#DEFAULT',
+  signIn: (sub) => `SIGNIN#${sub}`,
+  signInPrefix: () => 'SIGNIN#',
+  linkRequest: (sub) => `LINKREQUEST#${sub}`,
+  accountAudit: (id) => `ACCOUNTAUDIT#${id}`,
+  accountAuditPrefix: () => 'ACCOUNTAUDIT#',
 };
+
+/*
+ * One claim per Google account per sign-in pool, so a Google account can open only one
+ * ConnectED account. Outside every school's partition because the rule holds across schools.
+ */
+export const GOOGLE_PK = 'GOOGLEACCOUNT';
+export const googleSk = (pool, googleSub) => `${pool}#${googleSub}`;
 
 export const gsi1 = {
   pk: (schoolId, classId) => `SCHOOL#${schoolId}#CLASS#${classId}`,

@@ -117,17 +117,41 @@ export function passwordChanged({ to, firstName, portal = 'school' }, env) {
   });
 }
 
-/** A Google account was linked, so it can now sign in to this ConnectED account. */
-export function googleLinked({ to, firstName, portal = 'school' }, env) {
+/**
+ * A Google account was linked, so it can now sign in to this ConnectED account.
+ * Always sent to the account's own (school or Angaza) address, naming the Google account.
+ * googleEmail: the Google address; when Google gave none, the email says "A Google account".
+ * changed: it replaced a Google account linked before, and the person was signed out everywhere.
+ */
+export function googleLinked({ to, firstName, googleEmail, changed = false, portal = 'school' }, env) {
+  const account = googleEmail ? `The Google account ${googleEmail}` : 'A Google account';
   return compose({
-    kind: 'google-linked',
+    kind: changed ? 'google-link-changed' : 'google-linked',
     to,
-    subject: 'Google sign-in was added to your ConnectED account',
+    subject: changed ? 'The Google account on your ConnectED account was changed' : 'Google sign-in was added to your ConnectED account',
     paragraphs: [
       greet(firstName),
-      `The Google account ${to} can now sign in to your ConnectED account with “Continue with Google”. Your password still works too.`,
+      `${account} can now sign in to your ConnectED account with “Continue with Google”. Your password still works too.`,
+      ...(changed ? ['It replaces the Google account linked before, which can no longer sign in. You were signed out on every device, so sign in again.'] : []),
     ],
     button: { label: 'Open ConnectED', href: signInUrl(portal, env) },
+    after: [helpLine(portal)],
+  });
+}
+
+/** A Google link was removed, by the person or (removedBy: their name) by an administrator. */
+export function googleUnlinked({ to, firstName, googleEmail, removedBy = null, portal = 'school' }, env) {
+  const account = googleEmail ? `The Google account ${googleEmail}` : 'The Google account linked to your ConnectED account';
+  return compose({
+    kind: 'google-unlinked',
+    to,
+    subject: 'Google sign-in was removed from your ConnectED account',
+    paragraphs: [
+      greet(firstName),
+      `${account} can no longer sign in to your ConnectED account. ${removedBy ? `${removedBy}, an administrator, removed it.` : 'It was removed from your profile.'}`,
+      'You were signed out on every device. Sign in with your email and password. Access that was already open can last up to an hour on a device that stays offline.',
+    ],
+    button: { label: 'Sign in to ConnectED', href: signInUrl(portal, env) },
     after: [helpLine(portal)],
   });
 }

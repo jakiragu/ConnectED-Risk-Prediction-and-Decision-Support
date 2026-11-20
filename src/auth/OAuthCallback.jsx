@@ -22,7 +22,7 @@ export default function OAuthCallback({ platform = false }) {
     <div className="page" style={{ minHeight: '100vh', justifyContent: 'center' }}>
       <div style={{ textAlign: 'center' }}>
         <div className="brand-name">ConnectED</div>
-        <div className="brand-sub">{platform ? 'Angaza console' : 'Exam and Gradebook System'}</div>
+        <div className="brand-sub">{platform ? 'Angaza Center Console' : 'Exam and Gradebook System'}</div>
       </div>
       <div className="card form-card" style={{ marginTop: 0 }}>
         <div className="stack" style={{ alignItems: 'center', textAlign: 'center' }}>
