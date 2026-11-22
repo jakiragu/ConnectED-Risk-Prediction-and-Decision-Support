@@ -120,5 +120,8 @@ export const RESOLVERS = {
     startStaffGoogleLink: accountService,
     completeStaffGoogleLink: accountService,
     removeStaffGoogleLink: accountService,
+    deleteTeacher: accountService,
+    deleteSchool: platformService,
+    continueSchoolDeletion: platformService,
   },
 };

@@ -167,7 +167,8 @@ const studentView = (s, actor) => ({
 
 async function loadTeacher(schoolId, teacherId) {
   const t = await platform.teacher(schoolId, teacherId);
-  if (!t) throw notFound('Teacher not found');
+  // A deleted account keeps a record for its name only; it cannot be opened, changed or reactivated.
+  if (!t || platform.isDeleted(t)) throw notFound('Teacher not found');
   return t;
 }
 
@@ -199,7 +200,7 @@ async function me(actor) {
 
 async function listTeachers(actor, { school_id }) {
   assertAdmin(actor);
-  return (await platform.listTeachers(school_id)).map(teacherView);
+  return (await platform.listStaff(school_id)).map(teacherView);
 }
 
 function readRole(role) {

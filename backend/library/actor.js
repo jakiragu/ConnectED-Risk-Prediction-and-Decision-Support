@@ -13,6 +13,8 @@ export async function resolveActor(event) {
   if (school?.status === 'SUSPENDED') {
     throw schoolSuspended('ConnectED is paused for your school by Angaza. Your records are kept. Contact Angaza to restore access.');
   }
+  // Angaza is deleting the school (schoolDeletion.js): nobody is served from the moment it starts.
+  if (school?.status === 'DELETING') throw unauthorized('This school has been removed from ConnectED by Angaza.');
   if (!teacher) throw unauthorized('This account is not registered at this school');
   if (teacher.status !== 'ACTIVE') throw unauthorized('This account has been deactivated');
   // Sessions ended on purpose (a Google link was removed or changed): anything issued before that is refused.

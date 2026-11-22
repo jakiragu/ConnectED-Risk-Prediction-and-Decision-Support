@@ -20,3 +20,5 @@ export const schoolSuspended = (m) => new ServiceError('SchoolSuspended', m);
 export const reauthRequired = (m = 'Confirm your password to continue.') => new ServiceError('ReauthRequired', m);
 // The person's sessions were ended on purpose (a Google link was removed or changed). The web client signs out and says why.
 export const sessionEnded = (m) => new ServiceError('SessionEnded', m);
+// A deletion that could not be finished. What was already removed stays removed; trying again carries on.
+export const deleteFailed = (m) => new ServiceError('DeleteFailed', m);

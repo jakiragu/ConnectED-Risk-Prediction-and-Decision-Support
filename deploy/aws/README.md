@@ -194,6 +194,31 @@ How it is kept safe: the server checks Google's signed answer itself (genuine, f
 
 **Locally** there is no Google: `npm run api` starts a stand-in account chooser on `GOOGLE_STANDIN_URL` (see `.env.example`), and links are kept in the local table because cognito-local cannot link identities.
 
+## Deleting accounts and schools
+
+Both deletions are permanent. Nothing here can be undone from the app.
+
+**A deactivated account** (school administrators, Teachers page). A red *Delete* link appears on deactivated rows only. It removes the Cognito account, any linked Google account and its claim, the person's email and other details, and their subject assignments. A record with only their name stays, marked `DELETED`, so marks, interventions and archived classes still name them. Their email can then be used for a new account. The administrator must have signed in within the last ten minutes, or the app asks for the password. The person is not emailed. The deletion is written as an `ACCOUNTAUDIT#` record (`ACCOUNT_DELETED`).
+
+**A school** (Angaza staff, the school's page in the console). *Delete school* appears while the school is suspended, and also on a school that has no administrator yet (one registered by mistake); once a school has an administrator the page offers *Suspend* instead. You type its name, and need a sign-in from the last ten minutes. It removes every record in the school's partition, its Cognito accounts, Google claims, report-card PDFs (every version) and its name reservation. One line stays in the console, under *Deleted schools*, with who deleted it and when. Nobody at the school is emailed.
+
+A school is removed in slices of about 18 seconds. It switches to *Deleting…* first, which blocks every sign-in at once, and the console page asks for the next slice until none is left. **Keep the page open until it finishes.** If it is closed or a slice fails, the school stays blocked and opening its page again carries on; nothing remembers a position, each slice removes whatever is still there.
+
+**How long it takes** depends on the table. On the default provisioned 5 write units, expect roughly 5 records a second, so about an hour for 20,000 records. A newly registered school with a handful of records is gone in one request. For a large school you can switch `DynamoBillingMode` to `PAY_PER_REQUEST` first (requests are then billed).
+
+What the deployment changes, all in place (no pool, table or bucket is replaced; existing records need no migration):
+
+- **Permissions.** The API may delete users in the school pool (`AdminDeleteUser`), and list and delete object versions in the report bucket. Angaza accounts are never deleted by the app.
+- **API.** Three mutations (`deleteTeacher`, `deleteSchool`, `continueSchoolDeletion`), two school states (`DELETING`, `DELETED`) and five optional fields on `PlatformSchool`.
+
+**Check after deploying** (these need real Cognito and S3, so the automated tests use stand-ins for them):
+
+1. Add a test teacher, deactivate them, delete them. In the Cognito console the user is gone from the school pool. Add a teacher with the same email: it works.
+2. Register a test school and delete it straight away. Register another, add an administrator, suspend it, delete it. It appears under *Deleted schools*, its administrator is gone from the school pool, and the same name can be registered again.
+3. If the test school had report cards, the `report-cards/<school id>/` prefix in the report bucket is empty with *Show versions* on.
+
+**Demo reset.** A reset restores database records only. After one, a deleted school's or person's records come back, but they cannot sign in: their Cognito accounts are gone and are not recreated. Do not delete the demo school or demo accounts you plan to show; use a throwaway school and teacher for the demonstration.
+
 ## Account emails (SES)
 
 ConnectED emails people when their account changes:

@@ -1,10 +1,11 @@
 import {
+  AdminDeleteUserCommand,
   AdminDisableProviderForUserCommand,
   AdminGetUserCommand,
   AdminLinkProviderForUserCommand,
   AdminUserGlobalSignOutCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { cognito, ddb } from './client.js';
 import { TABLE } from './keys.js';
 
@@ -18,8 +19,10 @@ import { TABLE } from './keys.js';
  *   link(pool, username, googleSub)
  *   unlink(pool, googleSub)
  *   endSessions(pool, username)   every refresh token stops working
+ *   deleteUser(pool, username)    the sign-in account itself is removed; one that is already gone is not an error
  */
 const PROVIDER = 'Google';
+const gone = (e) => e?.name === 'UserNotFoundException';
 const attr = (user, name) => (user.UserAttributes || user.Attributes || []).find((a) => a.Name === name)?.Value ?? null;
 
 export const cloud = (send = (command) => cognito.send(command)) => ({
@@ -46,6 +49,13 @@ export const cloud = (send = (command) => cognito.send(command)) => ({
     User: { ProviderName: PROVIDER, ProviderAttributeName: 'Cognito_Subject', ProviderAttributeValue: googleSub },
   })),
   endSessions: (pool, username) => send(new AdminUserGlobalSignOutCommand({ UserPoolId: pool, Username: username })),
+  async deleteUser(pool, username) {
+    try {
+      await send(new AdminDeleteUserCommand({ UserPoolId: pool, Username: username }));
+    } catch (e) {
+      if (!gone(e)) throw e;
+    }
+  },
 });
 
 /**
@@ -77,6 +87,16 @@ export const local = () => {
       await write(pool, `google#${googleSub}`, { username: null });
     },
     async endSessions() { /* cognito-local cannot revoke; the API still refuses older sessions (actor.js) */ },
+    async deleteUser(pool, username) {
+      const item = await read(pool, `user#${username}`);
+      for (const g of item?.google || []) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: localKey(pool, `google#${g.sub}`) }));
+      await ddb.send(new DeleteCommand({ TableName: TABLE, Key: localKey(pool, `user#${username}`) }));
+      try {
+        await cognito.send(new AdminDeleteUserCommand({ UserPoolId: pool, Username: username }));
+      } catch (e) {
+        if (!gone(e)) throw e;
+      }
+    },
   };
 };
 
@@ -84,3 +104,13 @@ const isLocal = (env = process.env) => {
   try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(env.COGNITO_ENDPOINT).hostname); } catch { return false; }
 };
 export const identityProvider = (env = process.env) => (isLocal(env) ? local() : cloud());
+
+/** The Google accounts linked to an account, or none when the account no longer exists (a deletion being resumed). */
+export async function identitiesOrNone(idp, pool, username) {
+  try {
+    return await idp.identities(pool, username);
+  } catch (e) {
+    if (gone(e)) return { google: [], lastSeenEmail: null };
+    throw e;
+  }
+}

@@ -55,6 +55,12 @@ export const listTeachers = async (schoolId) =>
   (await queryPrefix(schoolId, sk.teacherPrefix())).sort((a, b) =>
     `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`));
 
+/** Deleted accounts keep a small record so history can still name them (accountDeletion.js). */
+export const isDeleted = (t) => t?.status === 'DELETED';
+
+/** Everyone who still has an account, active or deactivated. listTeachers also returns deleted people, for their names. */
+export const listStaff = async (schoolId) => (await listTeachers(schoolId)).filter((t) => !isDeleted(t));
+
 /** teacher_id -> "First Last", for naming who logged or changed a record from its current teacher record. */
 export const teacherNames = async (schoolId) =>
   new Map((await listTeachers(schoolId)).map((t) => [t.teacher_id, [t.first_name, t.last_name].filter(Boolean).join(' ') || null]));

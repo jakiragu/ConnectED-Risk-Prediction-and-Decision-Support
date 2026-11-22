@@ -12,10 +12,12 @@ import {
   SET_TEACHER_ASSIGNMENTS,
   UPDATE_TEACHER,
 } from '../api/operations.js';
+import { DELETE_TEACHER } from '../api/accountOperations.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { Field, Select } from '../components/Field.jsx';
 import { useSync } from '../offline/useSync.js';
-import { DangerButton, ActionIcon } from '../components/ui.jsx';
+import { DangerButton, ActionIcon, Dialog } from '../components/ui.jsx';
+import { usePasswordConfirmation } from '../components/SignInMethods.jsx';
 import { classLabel, classLabels } from '../classLabels.js';
 
 const ROLES = ['Teacher', 'Admin'];
@@ -211,8 +213,46 @@ function Manage({ teacher, classes, isSelf, run }) {
   );
 }
 
+/**
+ * Confirms deleting a deactivated account, saying exactly what goes and what stays.
+ * The server asks for a sign-in from the last ten minutes; the page then asks for the password.
+ */
+function DeleteAccountDialog({ teacher, busy, error, onDelete, onClose }) {
+  if (!teacher) return null;
+  const name = fullName(teacher);
+  return (
+    <Dialog open title={`Delete ${name}’s account?`} onClose={onClose} busy={busy} labelId="delete-account-title">
+      <p>This cannot be undone. {teacher.first_name} will never be able to log in to this account again.</p>
+      {error && <div className="notice error" role="alert">{error}</div>}
+      <div className="delete-summary">
+        <div>
+          <h3>Removed</h3>
+          <ul className="plain consequences">
+            <li>Their sign-in account and password.</li>
+            <li>Their email ({teacher.email}) and other personal details.</li>
+            <li>Any Google account they linked, which someone else can then link.</li>
+            <li>Their subject assignments.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Kept</h3>
+          <ul className="plain consequences kept">
+            <li>Their name on past records: marks they entered, interventions they assigned, classes they led.</li>
+            <li>Students’ marks, results and report cards. Nothing of the students’ is deleted.</li>
+          </ul>
+        </div>
+      </div>
+      <p className="hint">Afterwards {teacher.email} can be used for a new account.</p>
+      <div className="row">
+        <DangerButton onClick={onDelete} disabled={busy}>{busy ? 'Deleting…' : 'Delete account'}</DangerButton>
+        <button type="button" className="btn secondary" onClick={onClose} disabled={busy} data-autofocus>Cancel</button>
+      </div>
+    </Dialog>
+  );
+}
+
 export default function Teachers() {
-  const { actor } = useAuth();
+  const { actor, reauthenticate } = useAuth();
   const { online } = useSync();
   const [teachers, setTeachers] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -222,6 +262,12 @@ export default function Teachers() {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(null); // the deactivated person whose account is being deleted
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+  const { run: withRecentSignIn, prompt } = usePasswordConfirmation({
+    reauthenticate, accountEmail: actor.email, reason: 'Deleting an account needs a recent log in.',
+  });
 
   const load = useCallback(async () => {
     const [{ listTeachers }, { listSchoolClasses }] = await Promise.all([
@@ -257,6 +303,26 @@ export default function Teachers() {
     e.preventDefault();
     await run(CREATE_TEACHER, { input: { school_id: actor.schoolId, ...form } }, null, true);
     setForm(EMPTY);
+  }
+
+  async function deleteAccount() {
+    const person = deleting;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    setError(null);
+    setNotice(null);
+    try {
+      await withRecentSignIn(() => gql(DELETE_TEACHER, { input: { school_id: actor.schoolId, teacher_id: person.teacher_id } }));
+      setDeleting(null);
+      if (selected === person.teacher_id) setSelected(null);
+      setNotice(`${fullName(person)}’s account was deleted. Their name stays on past records, and ${person.email} can be used for a new account.`);
+    } catch (e) {
+      // Cancelling the password prompt returns to the confirmation, with nothing changed.
+      if (!e.cancelled) setDeleteError(e.message);
+    } finally {
+      await load().catch(() => {});
+      setDeleteBusy(false);
+    }
   }
 
   const classNames = classLabels(classes);
@@ -316,6 +382,11 @@ export default function Teachers() {
                   <button type="button" className="btn link" onClick={() => setSelected(t.teacher_id === selected ? null : t.teacher_id)}>
                     {t.teacher_id === selected ? 'Close' : 'Manage'}
                   </button>
+                  {t.status !== 'ACTIVE' && t.teacher_id !== actor.sub && (
+                    <button type="button" className="btn link danger" onClick={() => { setDeleteError(null); setDeleting(t); }}>
+                      Delete
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -324,6 +395,10 @@ export default function Teachers() {
       </div>
 
       {current && <Manage teacher={current} classes={classes} isSelf={current.teacher_id === actor.sub} run={run} />}
+
+      <DeleteAccountDialog teacher={deleting} busy={deleteBusy} error={deleteError} onDelete={deleteAccount}
+        onClose={() => setDeleting(null)} />
+      {prompt}
     </>
   );
 }

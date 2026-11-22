@@ -1,6 +1,6 @@
-import { GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { BatchWriteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb } from './client.js';
-import { TABLE, PLATFORM_PK, platformSk, pk, sk } from './keys.js';
+import { TABLE, GOOGLE_PK, PLATFORM_PK, platformSk, pk, sk } from './keys.js';
 import { ulid } from './ids.js';
 import { sameSchoolKey } from './locations.js';
 
@@ -157,8 +157,8 @@ const profileUpdate = (schoolId, fields) => {
   };
 };
 
-/** A versioned update of the registration; null fields are removed. */
-const registrationUpdate = (schoolId, fields, expectedVersion) => {
+/** A versioned update of the registration; null fields are removed. `only`: the status it must still have. */
+const registrationUpdate = (schoolId, fields, expectedVersion, only = null) => {
   const names = { '#v': '_version' };
   const values = { ':exp': expectedVersion, ':one': 1, ':ts': nowIso() };
   const sets = ['updated_at = :ts', '#v = #v + :one'];
@@ -171,12 +171,16 @@ const registrationUpdate = (schoolId, fields, expectedVersion) => {
       sets.push(`#${key} = :${key}`);
     }
   }
+  if (only) {
+    names['#status'] = 'status';
+    values[':only'] = only;
+  }
   return {
     Update: {
       TableName: TABLE,
       Key: { PK: PLATFORM_PK, SK: platformSk.school(schoolId) },
       UpdateExpression: `SET ${sets.join(', ')}${removes.length ? ` REMOVE ${removes.join(', ')}` : ''}`,
-      ConditionExpression: 'attribute_exists(PK) AND #v = :exp',
+      ConditionExpression: `attribute_exists(PK) AND #v = :exp${only ? ' AND #status = :only' : ''}`,
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,
     },
@@ -289,4 +293,159 @@ export async function usage(schoolId) {
     })),
   ]);
   return { classes, teachers, students };
+}
+
+
+// ------------------------------------------------------------ deleting a school
+//
+// Used by schoolDeletion.js, which holds the rules and the order. A school being deleted has
+// status DELETING on both its registration and its profile; when everything is gone the
+// registration is replaced by a one-line entry with status DELETED and nothing of the school's.
+
+/** Marks a school as being deleted, if it still has the status the caller saw. From this moment nobody at the school is served. */
+export async function beginDeletion(current, expectedVersion, actor) {
+  const schoolId = current.school_id;
+  const fields = { status: 'DELETING', deletion_started_at: nowIso(), deletion_started_by: actor.sub, deletion_started_by_name: actor.name, deleted_records: 0 };
+  try {
+    await ddb.send(new TransactWriteCommand({
+      TransactItems: [
+        registrationUpdate(schoolId, fields, expectedVersion, current.status || 'ACTIVE'),
+        profileUpdate(schoolId, { status: 'DELETING' }),
+        { Put: { TableName: TABLE, Item: auditItem(schoolId, 'SCHOOL_DELETION_STARTED', actor, { name: current.name }) } },
+      ],
+    }));
+  } catch (e) {
+    if (failedAt(e, 0)) throw fail(STALE);
+    throw e;
+  }
+  return registration(schoolId);
+}
+
+/** Up to `limit` of the school's people who still have a record (teachers and administrators, deleted ones included). */
+export async function staffPage(schoolId, limit) {
+  const res = await ddb.send(new QueryCommand({
+    TableName: TABLE,
+    ...inSchool(schoolId, sk.teacherPrefix()),
+    ConsistentRead: true,
+    Limit: limit,
+  }));
+  return res.Items || [];
+}
+
+/** Up to `limit` keys of what the school still holds, leaving its profile (removed last, with the registration). */
+export async function recordKeysPage(schoolId, limit) {
+  const res = await ddb.send(new QueryCommand({
+    TableName: TABLE,
+    KeyConditionExpression: 'PK = :p',
+    ExpressionAttributeValues: { ':p': pk(schoolId) },
+    ProjectionExpression: 'PK, SK',
+    ConsistentRead: true,
+    Limit: limit,
+  }));
+  return (res.Items || []).filter((k) => k.SK !== sk.school());
+}
+
+/** The Google-account claims held by people of this school, in this sign-in pool. */
+export const googleClaimKeys = async (pool, schoolId) =>
+  (await queryAll({
+    KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
+    FilterExpression: 'school_id = :id',
+    ExpressionAttributeValues: { ':p': GOOGLE_PK, ':s': `${pool}#`, ':id': schoolId },
+    ProjectionExpression: 'PK, SK',
+  }));
+
+/**
+ * Deletes records by key, 25 a request, retrying what DynamoDB hands back unprocessed (it does
+ * that when the table is throttled). Returns how many were deleted; fewer than asked means the
+ * table is busy and the caller should stop for now.
+ */
+export async function deleteKeys(keys) {
+  let deleted = 0;
+  for (let i = 0; i < keys.length; i += 25) {
+    let batch = keys.slice(i, i + 25).map((Key) => ({ DeleteRequest: { Key: { PK: Key.PK, SK: Key.SK } } }));
+    for (let attempt = 0; batch.length && attempt < 4; attempt += 1) {
+      if (attempt) await new Promise((r) => setTimeout(r, 200 * 2 ** attempt));
+      const res = await ddb.send(new BatchWriteCommand({ RequestItems: { [TABLE]: batch } }));
+      const left = res.UnprocessedItems?.[TABLE] || [];
+      deleted += batch.length - left.length;
+      batch = left;
+    }
+    if (batch.length) break;
+  }
+  return deleted;
+}
+
+/** Adds to the running total the console shows while a school is being deleted. */
+export const addDeletionProgress = (schoolId, count) =>
+  ddb.send(new UpdateCommand({
+    TableName: TABLE,
+    Key: { PK: PLATFORM_PK, SK: platformSk.school(schoolId) },
+    UpdateExpression: 'ADD deleted_records :n',
+    ConditionExpression: 'attribute_exists(PK)',
+    ExpressionAttributeValues: { ':n': count },
+  }));
+
+/**
+ * Angaza's own audit rows about the school stay (who registered, suspended and deleted it),
+ * but an administrator's email address quoted in them does not.
+ */
+export async function scrubAudit(schoolId) {
+  const rows = await queryAll({
+    KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
+    ExpressionAttributeValues: { ':p': PLATFORM_PK, ':s': `AUDIT#${schoolId}#` },
+  });
+  for (const row of rows) {
+    if (!row.details || !('email' in row.details)) continue;
+    const { email: _email, ...details } = row.details;
+    await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: row.PK, SK: row.SK },
+      UpdateExpression: 'SET #d = :d',
+      ExpressionAttributeNames: { '#d': 'details' },
+      ExpressionAttributeValues: { ':d': details },
+    }));
+  }
+}
+
+/**
+ * The last step, in one transaction: the registration becomes a one-line entry (name, place,
+ * who deleted it and when), the name is released for a new school, and the profile goes.
+ */
+export async function finishDeletion(reg) {
+  const at = nowIso();
+  const entry = {
+    PK: PLATFORM_PK,
+    SK: platformSk.school(reg.school_id),
+    entity: 'SchoolRegistration',
+    school_id: reg.school_id,
+    name: reg.name,
+    country: reg.country,
+    region: reg.region,
+    town: reg.town ?? null,
+    time_zone: reg.time_zone ?? null,
+    status: 'DELETED',
+    created_at: reg.created_at ?? null,
+    created_by_name: reg.created_by_name ?? null,
+    deleted_at: at,
+    deleted_by: reg.deletion_started_by ?? null,
+    deleted_by_name: reg.deletion_started_by_name ?? null,
+    deleted_records: reg.deleted_records ?? 0,
+    updated_at: at,
+    _version: (reg._version ?? 1) + 1,
+  };
+  const by = { sub: reg.deletion_started_by ?? null, name: reg.deletion_started_by_name ?? null };
+  try {
+    await ddb.send(new TransactWriteCommand({
+      TransactItems: [
+        { Put: { TableName: TABLE, Item: entry, ConditionExpression: '#st = :deleting', ExpressionAttributeNames: { '#st': 'status' }, ExpressionAttributeValues: { ':deleting': 'DELETING' } } },
+        { Delete: { TableName: TABLE, Key: { PK: PLATFORM_PK, SK: platformSk.schoolName(sameSchoolKey(reg)) }, ConditionExpression: 'attribute_not_exists(PK) OR school_id = :id', ExpressionAttributeValues: { ':id': reg.school_id } } },
+        { Delete: { TableName: TABLE, Key: { PK: pk(reg.school_id), SK: sk.school() } } },
+        { Put: { TableName: TABLE, Item: auditItem(reg.school_id, 'SCHOOL_DELETED', by, { name: reg.name, records: entry.deleted_records }) } },
+      ],
+    }));
+  } catch (e) {
+    // Someone else's request finished it a moment ago: that is the outcome wanted.
+    if (!failedAt(e, 0)) throw e;
+  }
+  return registration(reg.school_id);
 }

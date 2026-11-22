@@ -8,11 +8,12 @@ import { sendEach, sendEmail } from '../../library/mailer.js';
 import * as platform from '../../library/platformRepo.js';
 import * as school from '../../library/schoolRepo.js';
 import * as store from '../../library/platformStore.js';
+import { continueDeletion, startDeletion } from '../../library/schoolDeletion.js';
 
 /**
  * The Angaza console. Angaza staff register schools, give each school its
- * first administrator, help an administrator who is locked out, and suspend
- * or reactivate a school. Everything else (classes, terms, teachers, marks)
+ * first administrator, help an administrator who is locked out, suspend or
+ * reactivate a school, and delete one for good (schoolDeletion.js). Everything else (classes, terms, teachers, marks)
  * belongs to the school's own administrators.
  *
  * Only Angaza accounts reach these operations (resolvePlatformActor), and they
@@ -40,6 +41,10 @@ export async function handler(event) {
       return addSchoolAdmin(actor, input);
     case 'resetSchoolAdminPassword':
       return resetSchoolAdminPassword(actor, input);
+    case 'deleteSchool':
+      return deleteSchool(actor, input);
+    case 'continueSchoolDeletion':
+      return schoolView(await continueDeletion(input.school_id));
     default:
       throw notFound(`No handler for ${event.info.fieldName}`);
   }
@@ -71,9 +76,13 @@ const storeError = (place) => (e) => {
   throw e;
 };
 
-async function loadRegistration(schoolId) {
+const GONE = { DELETING: 'is being deleted', DELETED: 'was deleted' };
+
+/** changing: the caller is about to change the school, which a school being deleted (or deleted) no longer allows. */
+async function loadRegistration(schoolId, { changing = true } = {}) {
   const reg = schoolId ? await store.registration(schoolId) : null;
   if (!reg) throw notFound('This school is not registered. It may have been entered with a different link.');
+  if (changing && GONE[reg.status]) throw validation(`${reg.name} ${GONE[reg.status]}, so it can no longer be changed.`);
   return reg;
 }
 
@@ -97,6 +106,11 @@ const schoolView = (r, extra = {}) => ({
   created_at: r.created_at ?? null,
   created_by_name: r.created_by_name ?? null,
   updated_at: r.updated_at ?? null,
+  deletion_started_at: r.deletion_started_at ?? null,
+  deletion_started_by_name: r.deletion_started_by_name ?? null,
+  deleted_at: r.deleted_at ?? null,
+  deleted_by_name: r.deleted_by_name ?? null,
+  deleted_records: r.deleted_records ?? null,
   active_admin_count: null,
   _version: r._version ?? 1,
   ...extra,
@@ -116,14 +130,16 @@ const adminView = (t, signIn) => ({
 async function listSchools() {
   const regs = await store.listRegistrations();
   // One small count per school, in parallel: enough for a few hundred schools.
-  const counts = await Promise.all(regs.map((r) => store.activeAdminCount(r.school_id)));
+  const counts = await Promise.all(regs.map((r) => (GONE[r.status] ? 0 : store.activeAdminCount(r.school_id))));
   return regs
     .map((r, i) => schoolView(r, { active_admin_count: counts[i] }))
     .sort((a, b) => a.country_name.localeCompare(b.country_name) || a.name.localeCompare(b.name));
 }
 
 async function getSchool(schoolId) {
-  const reg = await loadRegistration(schoolId);
+  const reg = await loadRegistration(schoolId, { changing: false });
+  // Being deleted, or deleted: the one line the console keeps, and nothing from inside the school.
+  if (GONE[reg.status]) return { school: schoolView(reg, { active_admin_count: 0 }), admins: [], usage: { classes: 0, teachers: 0, students: 0 } };
   const [admins, usage] = await Promise.all([store.admins(schoolId), store.usage(schoolId)]);
   const states = await Promise.all(admins.map((a) => identity.accountState(a.teacher_id)));
   const adminRows = admins
@@ -187,6 +203,17 @@ async function reactivateSchool(actor, input) {
 async function tellAdmins(reg, suspended) {
   const admins = (await store.admins(reg.school_id).catch(() => [])).filter((a) => (a.status || 'ACTIVE') === 'ACTIVE' && a.email);
   await sendEach(admins.map((a) => schoolStatus({ to: a.email, firstName: a.first_name, schoolName: reg.name, suspended })));
+}
+
+/**
+ * Deletes a school for good (suspended, or without an active administrator). The rules, the order and what is kept are in
+ * library/schoolDeletion.js. Returns the school as DELETING (the console then calls
+ * continueSchoolDeletion until it reads DELETED) or, for a small school, already DELETED.
+ */
+async function deleteSchool(actor, input) {
+  const current = await loadRegistration(input.school_id, { changing: false });
+  const reg = await startDeletion(actor, current, { confirmName: input.confirm_name, version: input._version }).catch(storeError(current));
+  return schoolView(reg);
 }
 
 // ------------------------------------------------------------ administrators

@@ -4,13 +4,15 @@ import { resolvePlatformActor } from '../../library/platformActor.js';
 import { notFound } from '../../library/errors.js';
 import * as platform from '../../library/platformRepo.js';
 import * as links from '../../library/accountLink.js';
+import { deleteAccount } from '../../library/accountDeletion.js';
 import { angazaRealm, policy as readPolicy, schoolRealm } from '../../library/accountLinkRepo.js';
 
 /**
  * Sign-in methods: linking a person's own Google account to their ConnectED
  * account, for school staff (My Profile, Settings > Accounts) and Angaza staff
- * (the console's My Profile). The rules are in library/accountLink.js; this
- * file only decides who is asking and whose account is meant.
+ * (the console's My Profile), and deleting a deactivated account for good. The
+ * rules are in library/accountLink.js and library/accountDeletion.js; this file
+ * only decides who is asking and whose account is meant.
  */
 const STAFF_FIELDS = new Set(['getStaffProfile', 'startStaffGoogleLink', 'completeStaffGoogleLink', 'removeStaffGoogleLink']);
 
@@ -43,7 +45,7 @@ async function schoolHandler(event, field) {
       // Anyone may remove their own link, whatever the school's policy; only an administrator may remove someone else's.
       if (other) assertAdmin(actor);
       const record = other ? await platform.teacher(actor.schoolId, input.teacher_id) : null;
-      if (other && !record) throw notFound('That person is not registered at this school');
+      if (other && (!record || platform.isDeleted(record))) throw notFound('That person is not registered at this school');
       const target = other
         ? { sub: record.teacher_id, email: record.email, firstName: record.first_name, role: record.role }
         : { sub: actor.sub, email: actor.email, firstName: actor.firstName, role: actor.role };
@@ -58,12 +60,15 @@ async function schoolHandler(event, field) {
       return policyView(await links.savePolicy(realm, actor, input));
     case 'listAccountLinks': {
       assertAdmin(actor);
-      const rows = await links.listLinks(realm, await platform.listTeachers(actor.schoolId));
+      const rows = await links.listLinks(realm, await platform.listStaff(actor.schoolId));
       return rows.map(({ person: p, ...link }) => ({
         teacher_id: p.teacher_id, first_name: p.first_name, last_name: p.last_name, email: p.email,
         role: p.role || 'Teacher', status: p.status || 'ACTIVE', ...link,
       }));
     }
+    case 'deleteTeacher':
+      assertAdmin(actor);
+      return deleteAccount(realm, actor, input.teacher_id);
     default:
       throw notFound(`No handler for ${field}`);
   }

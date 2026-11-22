@@ -35,11 +35,13 @@ export const linkedOn = (iso) => {
 
 /**
  * Runs a sensitive action; if the server asks for a recent sign-in, asks for the password,
- * signs in again and retries the same action. Used by this card and by Settings > Accounts.
+ * signs in again and retries the same action. Used by this card, by Settings > Accounts, and before
+ * deleting an account (Teachers page) or a school (Angaza console).
  *
+ * @param {string} [props.reason]  why the password is asked for; the default speaks of sign-in methods
  * @returns {{ run: (action: () => Promise<any>) => Promise<any>, prompt: JSX.Element|null }}
  */
-export function usePasswordConfirmation({ reauthenticate, accountEmail }) {
+export function usePasswordConfirmation({ reauthenticate, accountEmail, reason = 'Changing how you sign in needs a recent log in.' }) {
   const [pending, setPending] = useState(null); // { action, resolve, reject }
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -83,7 +85,7 @@ export function usePasswordConfirmation({ reauthenticate, accountEmail }) {
   const prompt = pending ? (
     <Dialog open title="Confirm your password" onClose={cancel} busy={busy} labelId="confirm-password-title">
       <form className="stack" onSubmit={confirm}>
-        <p>Changing how you sign in needs a recent log in. Enter your password to continue.</p>
+        <p>{reason} Enter your password to continue.</p>
         {error && <div className="notice error" role="alert">{error}</div>}
         <Field label="Email">
           <input value={accountEmail || ''} readOnly disabled autoComplete="username" />

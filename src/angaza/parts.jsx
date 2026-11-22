@@ -42,10 +42,16 @@ export function LocalTime({ timeZone, now, difference = true }) {
   );
 }
 
+const SCHOOL_STATUS = {
+  ACTIVE: ['good', 'Active'],
+  SUSPENDED: ['warn', 'Suspended'],
+  DELETING: ['warn', 'Deleting…'],
+  DELETED: ['neutral', 'Deleted'],
+};
+
 export function SchoolStatus({ status }) {
-  return status === 'SUSPENDED'
-    ? <span className="pill warn">Suspended</span>
-    : <span className="pill good">Active</span>;
+  const [tone, label] = SCHOOL_STATUS[status] || SCHOOL_STATUS.ACTIVE;
+  return <span className={`pill ${tone}`}>{label}</span>;
 }
 
 const SIGN_IN = {

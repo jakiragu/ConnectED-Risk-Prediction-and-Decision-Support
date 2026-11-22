@@ -4993,3 +4993,111 @@ th .sort:focus-visible {
     display: none;
   }
 }
+
+/* ======================================================================
+   Deleting an account (Teachers page) and a school (Angaza console)
+   ====================================================================== */
+/* The confirmation says what goes and what stays, side by side. */
+.delete-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.delete-summary h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--t-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.delete-summary .consequences {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.delete-summary li {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .delete-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A school being deleted: a moving bar (the total is not known in advance) and the running count. */
+.progress.wide {
+  display: flex;
+  font-size: var(--t-base);
+  color: var(--ink);
+}
+
+.progress.wide .track {
+  flex: 0 0 12rem;
+  position: relative;
+}
+
+.progress .track.indeterminate i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: 999px;
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(290%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress .track.indeterminate i {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
+  }
+}
+
+/* Deleted schools: one line each, at the foot of the console's list. */
+:where(.console) .deleted-schools {
+  margin-top: var(--space-6);
+}
+
+:where(.console) .deleted-list {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+:where(.console) .deleted-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+
+:where(.console) .deleted-list li+li {
+  border-top: 1px solid var(--line-soft);
+}
+
+:where(.console) .deleted-list b {
+  color: var(--ink);
+  font-size: var(--t-base);
+}
+
+@media (max-width: 720px) {
+  :where(.console) .deleted-list li {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+}

@@ -4,6 +4,7 @@ import { LIST_SCHOOLS } from '../api/platformOperations.js';
 import { EmptyState, Info } from '../components/ui.jsx';
 import { useAngaza } from './AngazaAuth.jsx';
 import { LocalTime, SchoolStatus, useLoad, useNow } from './parts.jsx';
+import { onDay } from './time.js';
 
 const VIEWS = [
   { id: 'all', label: 'All schools', test: () => true },
@@ -18,6 +19,8 @@ const matches = (s, q) =>
  * Every school, grouped by country. Each country shows the time there, because
  * staff in other time zones mostly need to know whether now is a good moment to
  * call. Filters live in the address, so Back and shared links keep them.
+ * A deleted school is not a school any more: it is listed once, at the foot of
+ * the page, as the one line Angaza keeps about it.
  */
 export default function SchoolsPage() {
   const { api } = useAngaza();
@@ -31,7 +34,8 @@ export default function SchoolsPage() {
 
   useEffect(() => { document.title = 'Schools: Angaza console'; }, []);
 
-  const schools = data || [];
+  const schools = (data || []).filter((s) => s.status !== 'DELETED');
+  const deleted = (data || []).filter((s) => s.status === 'DELETED').sort((a, b) => String(b.deleted_at).localeCompare(String(a.deleted_at)));
   const setParam = (key, value) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value); else next.delete(key);
@@ -136,7 +140,7 @@ export default function SchoolsPage() {
                             {s.town && <div className="hint">{s.town}</div>}
                           </td>
                           <td data-label={first.region_label}>{s.region}</td>
-                          <td data-label="Administrators">{s.active_admin_count ? s.active_admin_count : <span className="warn">None yet</span>}</td>
+                          <td data-label="Administrators">{s.status === 'DELETING' ? '—' : s.active_admin_count ? s.active_admin_count : <span className="warn">None yet</span>}</td>
                           <td data-label="Status"><SchoolStatus status={s.status} /></td>
                         </tr>
                       ))}
@@ -147,6 +151,24 @@ export default function SchoolsPage() {
             );
           })}
         </>
+      )}
+
+      {deleted.length > 0 && (
+        <section className="deleted-schools" aria-labelledby="deleted-schools-title">
+          <div className="group-head">
+            <h2 id="deleted-schools-title">Deleted schools</h2>
+            <span className="hint">{deleted.length} school{deleted.length === 1 ? '' : 's'}. Their records are gone; this line is all that is kept.</span>
+          </div>
+          <ul className="plain deleted-list">
+            {deleted.map((s) => (
+              <li key={s.school_id}>
+                <b>{s.name}</b>
+                <span className="hint">{[s.region, s.country_name].filter(Boolean).join(', ')}</span>
+                <span>Deleted {onDay(s.deleted_at)}{s.deleted_by_name ? ` by ${s.deleted_by_name}` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {loading && !data && <p className="hint" role="status">Loading schools…</p>}

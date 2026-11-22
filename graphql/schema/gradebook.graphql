@@ -1748,7 +1748,7 @@ input RevertPromotionInput {
 # the platform pool is an additional Cognito authorisation mode; the services tell
 # the pools apart by the token's issuer (backend/library/platformAuth.js).
 
-enum SchoolStatus { ACTIVE SUSPENDED }
+enum SchoolStatus { ACTIVE SUSPENDED DELETING DELETED }
 enum AdminSignIn { SIGNED_IN WAITING DISABLED UNKNOWN }   # WAITING: has not used their temporary password yet
 
 type PlatformSchool {
@@ -1769,6 +1769,11 @@ type PlatformSchool {
   created_at: AWSDateTime
   created_by_name: String
   updated_at: AWSDateTime
+  deletion_started_at: AWSDateTime
+  deletion_started_by_name: String
+  deleted_at: AWSDateTime
+  deleted_by_name: String
+  deleted_records: Int
   active_admin_count: Int
   _version: Int!
 }
@@ -1911,6 +1916,28 @@ input RemoveGoogleLinkInput {
   teacher_id: ID
 }
 
+input DeleteTeacherInput {
+  school_id: ID!
+  teacher_id: ID!
+}
+
+type DeletedAccount {
+  teacher_id: ID!
+  first_name: String
+  last_name: String
+  deleted_at: AWSDateTime
+}
+
+input DeleteSchoolInput {
+  school_id: ID!
+  confirm_name: String!
+  _version: Int!
+}
+
+input ContinueSchoolDeletionInput {
+  school_id: ID!
+}
+
 input SaveAccountPolicyInput {
   school_id: ID!
   google_linking: GoogleLinkingPolicy!
@@ -2027,6 +2054,9 @@ type Mutation {
   startStaffGoogleLink: GoogleLinkStart!
   completeStaffGoogleLink(input: CompleteStaffGoogleLinkInput!): GoogleLinkResult!
   removeStaffGoogleLink: GoogleLinkResult!
+  deleteTeacher(input: DeleteTeacherInput!): DeletedAccount!
+  deleteSchool(input: DeleteSchoolInput!): PlatformSchool!
+  continueSchoolDeletion(input: ContinueSchoolDeletionInput!): PlatformSchool!
   applyPromotion(input: ApplyPromotionInput!): PromotionRun!                  # Admin; resumable, idempotent
   revertPromotion(input: RevertPromotionInput!): PromotionRun!                # Admin; until the new year has records
 

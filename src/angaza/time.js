@@ -61,5 +61,9 @@ export const myTime = (date = new Date()) =>
   new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date);
 
 /** "3 Nov 2026, 14:05" in the viewer's own time. */
+/** "16 Nov 2026" */
+export const onDay = (iso) =>
+  iso ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso)) : '';
+
 export const when = (iso) =>
   iso ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) : '';

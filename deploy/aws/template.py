@@ -83,11 +83,16 @@ def make_template():
     statements=[logs,
         policy(['dynamodb:GetItem','dynamodb:BatchGetItem','dynamodb:PutItem','dynamodb:UpdateItem','dynamodb:DeleteItem','dynamodb:Query','dynamodb:Scan','dynamodb:BatchWriteItem','dynamodb:ConditionCheckItem'],[att('Table','Arn'),sub('${Table.Arn}/index/*')]),
         policy(['s3:GetObject','s3:PutObject'],[sub('${ReportBucket.Arn}/*'),sub('${ModelBucket.Arn}/*')]),
+        # Deleting a school (backend/library/schoolDeletion.js) removes its report-card PDFs, every version: the bucket is versioned.
+        policy(['s3:ListBucket','s3:ListBucketVersions'],att('ReportBucket','Arn')),
+        policy(['s3:DeleteObject','s3:DeleteObjectVersion'],sub('${ReportBucket.Arn}/*')),
         policy(['events:PutEvents'],att('Bus','Arn')),
         policy(['states:StartExecution'],sub('arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-reports')),
         policy(['lambda:InvokeFunction'],[sub('arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-prediction'),sub('arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-scorer')]),
         policy(['cognito-idp:AdminCreateUser','cognito-idp:AdminGetUser','cognito-idp:AdminUpdateUserAttributes','cognito-idp:AdminAddUserToGroup','cognito-idp:AdminRemoveUserFromGroup','cognito-idp:AdminListGroupsForUser','cognito-idp:AdminDisableUser','cognito-idp:AdminEnableUser','cognito-idp:AdminSetUserPassword','cognito-idp:AdminResetUserPassword',
-            'cognito-idp:AdminLinkProviderForUser','cognito-idp:AdminDisableProviderForUser','cognito-idp:AdminUserGlobalSignOut'],att('SchoolPool','Arn')),
+            'cognito-idp:AdminLinkProviderForUser','cognito-idp:AdminDisableProviderForUser','cognito-idp:AdminUserGlobalSignOut',
+            # Deleting a deactivated account, or every account of a deleted school. School pool only: Angaza accounts are never deleted by the app.
+            'cognito-idp:AdminDeleteUser'],att('SchoolPool','Arn')),
         # Angaza staff link their own Google account from the console's My Profile; nothing else touches their pool.
         policy(['cognito-idp:AdminGetUser','cognito-idp:AdminLinkProviderForUser','cognito-idp:AdminDisableProviderForUser','cognito-idp:AdminUserGlobalSignOut'],att('AngazaPool','Arn')),
         policy(['sqs:SendMessage'],att('FailureQueue','Arn')),mail]

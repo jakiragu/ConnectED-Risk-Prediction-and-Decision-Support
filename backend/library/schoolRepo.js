@@ -73,6 +73,44 @@ export async function putTeacher(schoolId, teacher) {
 export const updateTeacher = (schoolId, teacherId, patch, expectedVersion) =>
   versioned(schoolId, sk.teacher(teacherId), patch, expectedVersion);
 
+/**
+ * Replaces a deactivated person's record with one that holds only their name, marked DELETED
+ * (accountDeletion.js). A whole-record replacement, so no personal detail can be left behind by
+ * a field this function does not know about. Refused (STALE) unless the record is still deactivated.
+ */
+export async function tombstoneTeacher(schoolId, person, { at, by }) {
+  const item = {
+    PK: pk(schoolId),
+    SK: sk.teacher(person.teacher_id),
+    entity: 'Teacher',
+    school_id: schoolId,
+    teacher_id: person.teacher_id,
+    first_name: person.first_name,
+    last_name: person.last_name,
+    status: 'DELETED',
+    assignments: [],
+    class_teacher_of: null,
+    created_at: person.created_at ?? null,
+    deleted_at: at,
+    deleted_by: by,
+    updated_at: at,
+    _version: (person._version ?? 1) + 1,
+  };
+  try {
+    await ddb.send(new PutCommand({
+      TableName: TABLE,
+      Item: item,
+      ConditionExpression: '#st = :inactive',
+      ExpressionAttributeNames: { '#st': 'status' },
+      ExpressionAttributeValues: { ':inactive': 'INACTIVE' },
+    }));
+    return item;
+  } catch (e) {
+    if (e.name !== 'ConditionalCheckFailedException') throw e;
+    throw fail(STALE);
+  }
+}
+
 
 export async function setClassTeacher(schoolId, klass, teacherId, expectedVersion) {
   const ts = nowIso();

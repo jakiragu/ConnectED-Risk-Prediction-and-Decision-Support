@@ -32,6 +32,11 @@ export const LIST_ACCOUNT_LINKS = /* GraphQL */ `
   }
 `;
 
+/** Deletes a deactivated account for good (Teachers page). Needs a recent sign-in (ReauthRequired otherwise). */
+export const DELETE_TEACHER = /* GraphQL */ `
+  mutation DeleteTeacher($input: DeleteTeacherInput!) { deleteTeacher(input: $input) { teacher_id first_name last_name deleted_at } }
+`;
+
 // ------------------------------------------------ Angaza staff (the console's My Profile)
 export const GET_STAFF_PROFILE = /* GraphQL */ `
   query GetStaffProfile { getStaffProfile { staff_id email first_name last_name status created_at sign_in { ${SIGN_IN} } } }

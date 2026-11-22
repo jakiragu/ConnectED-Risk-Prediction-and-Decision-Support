@@ -1,23 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { placeLabel } from '@gradebook/domain/locations';
 import {
-  ADD_SCHOOL_ADMIN, GET_SCHOOL, REACTIVATE_SCHOOL, RESET_SCHOOL_ADMIN_PASSWORD, SUSPEND_SCHOOL, UPDATE_SCHOOL,
+  ADD_SCHOOL_ADMIN, CONTINUE_SCHOOL_DELETION, DELETE_SCHOOL, GET_SCHOOL, REACTIVATE_SCHOOL, RESET_SCHOOL_ADMIN_PASSWORD,
+  SUSPEND_SCHOOL, UPDATE_SCHOOL,
 } from '../api/platformOperations.js';
 import { Field } from '../components/Field.jsx';
 import { DangerButton, Dialog, EmptyState, useToast } from '../components/ui.jsx';
+import { usePasswordConfirmation } from '../components/SignInMethods.jsx';
 import { useAngaza } from './AngazaAuth.jsx';
 import {
   Crumbs, Handover, LocalTime, PlaceFields, SchoolStatus, SignInState, focusField, splitError, useLoad, useNow,
 } from './parts.jsx';
-import { when } from './time.js';
+import { onDay, when } from './time.js';
 
 const fullName = (a) => `${a.first_name} ${a.last_name}`;
+const GONE = ['DELETING', 'DELETED'];
+const count = (n) => Number(n || 0).toLocaleString();
 
 /**
  * One school: getting it started (its first administrator), helping its
- * administrators, its details, and suspending it. Everything inside the school
- * (classes, teachers, students) is the school's own administrators' work.
+ * administrators, its details, suspending it, and deleting it (once suspended, or
+ * straight away while it has no administrator).
+ * Everything inside the school (classes, teachers, students) is the school's
+ * own administrators' work.
  */
 export default function SchoolPage() {
   const { schoolId } = useParams();
@@ -27,13 +33,13 @@ export default function SchoolPage() {
   const [toast, showToast] = useToast();
   const [handover, setHandover] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [dialog, setDialog] = useState(null); // 'suspend' | 'reactivate' | { reset: admin }
+  const [dialog, setDialog] = useState(null); // 'suspend' | 'reactivate' | 'delete' | { reset: admin }
   const { data, error, loading, reload } = useLoad(async () => (await api(GET_SCHOOL, { school_id: schoolId })).getSchool, [api, schoolId]);
 
   const school = data?.school;
   useEffect(() => { if (school) document.title = `${school.name}: Angaza console`; }, [school]);
   // A school without an administrator cannot start; open the form straight away.
-  useEffect(() => { if (data && !data.admins.some((a) => a.status === 'ACTIVE')) setAddOpen(true); }, [data]);
+  useEffect(() => { if (data && !GONE.includes(data.school.status) && !data.admins.some((a) => a.status === 'ACTIVE')) setAddOpen(true); }, [data]);
 
   if (error && !data) {
     const missing = error.errorType === 'NotFound';
@@ -52,6 +58,25 @@ export default function SchoolPage() {
   const { admins, usage } = data;
   const backTo = location.state?.from || '/angaza';
   const suspended = school.status === 'SUSPENDED';
+
+  // Being deleted, or deleted: nothing of the school is left to show or change.
+  if (GONE.includes(school.status)) {
+    return (
+      <>
+        <Crumbs items={[{ label: 'Schools', to: backTo }, { label: school.name }]} />
+        <header className="school-head">
+          <div className="school-title">
+            <h1>{school.name}</h1>
+            <SchoolStatus status={school.status} />
+          </div>
+          <p className="school-place">{placeLabel(school)}</p>
+        </header>
+        {school.status === 'DELETING'
+          ? <DeletionProgress key={school.school_id} school={school} api={api} onDone={reload} />
+          : <DeletedEntry school={school} />}
+      </>
+    );
+  }
 
   async function afterHandover(account, reset) {
     setHandover({ account, reset });
@@ -82,7 +107,10 @@ export default function SchoolPage() {
             Nobody at this school can use ConnectED until it is reactivated. Their records are kept.
           </div>
           {school.suspended_reason && <div><span className="hint">Reason:</span> {school.suspended_reason}</div>}
-          <div><button type="button" className="btn" onClick={() => setDialog('reactivate')}>Reactivate school</button></div>
+          <div className="row">
+            <button type="button" className="btn" onClick={() => setDialog('reactivate')}>Reactivate school</button>
+            <DangerButton onClick={() => setDialog('delete')}>Delete school</DangerButton>
+          </div>
         </div>
       )}
 
@@ -97,6 +125,16 @@ export default function SchoolPage() {
             onReset={(admin) => setDialog({ reset: admin })} />
           <DetailsCard school={school} api={api} now={now}
             onSaved={async () => { showToast('Details saved'); await reload(); }} />
+          {!suspended && !admins.some((a) => a.status === 'ACTIVE') && (
+            <section className="card stack danger-zone" aria-labelledby="delete-title">
+              <h2 id="delete-title">Delete this school</h2>
+              <p>
+                {school.name} has no administrator yet, so nobody is using it. If it was registered by mistake, delete it
+                here. Once it has an administrator, it can be suspended instead.
+              </p>
+              <div><DangerButton onClick={() => setDialog('delete')}>Delete school…</DangerButton></div>
+            </section>
+          )}
           {!suspended && admins.some((a) => a.status === 'ACTIVE') && (
             <section className="card stack danger-zone" aria-labelledby="suspend-title">
               <h2 id="suspend-title">Suspend this school</h2>
@@ -128,6 +166,8 @@ export default function SchoolPage() {
         onDone={async () => { setDialog(null); showToast('School suspended'); await reload(); }} />
       <ReactivateDialog open={dialog === 'reactivate'} school={school} api={api} onClose={() => setDialog(null)}
         onDone={async () => { setDialog(null); showToast('School reactivated'); await reload(); }} />
+      <DeleteDialog open={dialog === 'delete'} school={school} usage={usage} api={api} onClose={() => setDialog(null)}
+        onDone={async () => { setDialog(null); await reload(); }} />
       <ResetDialog admin={dialog?.reset || null} school={school} api={api} onClose={() => setDialog(null)}
         onDone={(account) => { setDialog(null); afterHandover(account, true); }} />
       {toast}
@@ -475,5 +515,155 @@ function ReactivateDialog({ open, school, api, onClose, onDone }) {
         <button type="button" className="btn secondary" onClick={onClose} disabled={busy}>Cancel</button>
       </div>
     </Dialog>
+  );
+}
+
+// ----------------------------------------------------------------------- delete
+
+/**
+ * Deleting a school for good (suspended, or with no administrator yet). The name is typed to confirm, and the server asks
+ * for a sign-in from the last ten minutes (the page then asks for the password). A small
+ * school is gone when this answers; a large one carries on in DeletionProgress.
+ */
+function DeleteDialog({ open, school, usage, api, onClose, onDone }) {
+  const { staff, reauthenticate } = useAngaza();
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const { run, prompt } = usePasswordConfirmation({
+    reauthenticate, accountEmail: staff.email, reason: 'Deleting a school needs a recent log in.',
+  });
+  useEffect(() => { if (open) { setTyped(''); setError(null); } }, [open]);
+
+  const ready = typed.trim().replace(/\s+/g, ' ').toLowerCase() === school.name.trim().replace(/\s+/g, ' ').toLowerCase();
+
+  async function remove(e) {
+    e.preventDefault();
+    if (!ready) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await run(() => api(DELETE_SCHOOL, { input: { school_id: school.school_id, confirm_name: typed, _version: school._version } }));
+      await onDone();
+    } catch (err) {
+      if (!err.cancelled) setError(err.message);
+      if (err.errorType === 'Conflict') await onDone().catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Dialog open={open} title={`Delete ${school.name}?`} onClose={onClose} busy={busy} labelId="delete-dialog-title">
+        <form className="stack" onSubmit={remove}>
+          <p><b>This cannot be undone.</b>{school.status === 'SUSPENDED' ? ' Reactivate the school instead if it may come back.' : ''}</p>
+          <ul className="plain consequences">
+            <li>
+              Every record the school holds is removed: {count(usage.students)} student{usage.students === 1 ? '' : 's'}, their marks,
+              results, attendance and risk history, and {count(usage.classes)} current class{usage.classes === 1 ? '' : 'es'}.
+            </li>
+            <li>All {count(usage.teachers)} staff sign-in account{usage.teachers === 1 ? '' : 's'} and any Google accounts linked to them.</li>
+            <li>Every report-card PDF.</li>
+            <li>The name becomes free for a new school.</li>
+          </ul>
+          <p className="hint">
+            Kept: one line in this console with the school’s name, who deleted it and when. Nobody at the school is emailed.
+          </p>
+          {error && <div className="notice error" role="alert">{error}</div>}
+          <Field label={`Type the school’s name to confirm: ${school.name}`} htmlFor="delete-name">
+            <input id="delete-name" value={typed} autoComplete="off" onChange={(e) => setTyped(e.target.value)} data-autofocus />
+          </Field>
+          {!ready && <p className="hint" aria-live="polite">Type the name exactly as shown to continue.</p>}
+          <div className="row">
+            <DangerButton type="submit" disabled={!ready || busy}>{busy ? 'Deleting…' : 'Delete school for good'}</DangerButton>
+            <button type="button" className="btn secondary" onClick={onClose} disabled={busy}>Cancel</button>
+          </div>
+        </form>
+      </Dialog>
+      {prompt}
+    </>
+  );
+}
+
+const RETRY_SECONDS = 5;
+const RETRIES = 6;
+
+/**
+ * A school being deleted. The server removes it a slice at a time; this asks for the next
+ * slice until none is left. Leaving the page pauses the work without harm: the school stays
+ * blocked, and opening this page again (by anyone on the Angaza staff) carries on.
+ */
+function DeletionProgress({ school, api, onDone }) {
+  const [current, setCurrent] = useState(school);
+  const [error, setError] = useState(null);
+  const [round, setRound] = useState(0);
+  const failures = useRef(0);
+
+  useEffect(() => {
+    if (current.status !== 'DELETING') return undefined;
+    let active = true;
+    let retry;
+    // A moment's wait, so a page that mounts twice (React StrictMode) or is left at once asks only once.
+    const start = setTimeout(async () => {
+      try {
+        const { continueSchoolDeletion: next } = await api(CONTINUE_SCHOOL_DELETION, { input: { school_id: school.school_id } });
+        if (!active) return;
+        failures.current = 0;
+        setError(null);
+        if (next.status === 'DELETED') await onDone();
+        else setCurrent(next);
+      } catch (e) {
+        if (!active) return;
+        failures.current += 1;
+        setError(e.message);
+        if (failures.current < RETRIES) retry = setTimeout(() => setRound((r) => r + 1), RETRY_SECONDS * 1000);
+      }
+    }, 300);
+    return () => { active = false; clearTimeout(start); clearTimeout(retry); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, round]);
+
+  const stopped = error && failures.current >= RETRIES;
+  return (
+    <section className="card stack deletion-progress" aria-labelledby="deleting-title" aria-live="polite">
+      <h2 id="deleting-title">Deleting this school…</h2>
+      <p>
+        Started {when(current.deletion_started_at)}{current.deletion_started_by_name ? ` by ${current.deletion_started_by_name}` : ''}.
+        Nobody at {current.name} can log in any more.
+      </p>
+      <div className="progress wide" role="status">
+        <span className="track indeterminate" aria-hidden="true"><i /></span>
+        <span><b>{count(current.deleted_records)}</b> record{current.deleted_records === 1 ? '' : 's'} removed so far</span>
+      </div>
+      {error && (
+        <div className="notice warn" role="alert">
+          {error}{' '}
+          {stopped
+            ? <button type="button" className="btn link" onClick={() => { failures.current = 0; setError(null); setRound((r) => r + 1); }}>Carry on</button>
+            : `Trying again in ${RETRY_SECONDS} seconds.`}
+        </div>
+      )}
+      <p className="hint">
+        Keep this page open until it finishes. A large school can take a while. If you leave, the school stays blocked, and
+        opening this page again carries on from where it stopped.
+      </p>
+    </section>
+  );
+}
+
+/** What the console keeps of a deleted school: one line. */
+function DeletedEntry({ school }) {
+  return (
+    <section className="card stack" aria-labelledby="deleted-title">
+      <h2 id="deleted-title">This school was deleted</h2>
+      <p>
+        {school.name} was deleted on {onDay(school.deleted_at)}{school.deleted_by_name ? ` by ${school.deleted_by_name}` : ''}.
+        Its records, sign-in accounts and report cards were removed{school.deleted_records ? ` (${count(school.deleted_records)} records)` : ''} and
+        cannot be restored. This entry is all that is kept.
+      </p>
+      <p className="hint">The name can be registered again as a new school, which starts empty.</p>
+      <div><Link to="/angaza" className="btn secondary">Back to schools</Link></div>
+    </section>
   );
 }

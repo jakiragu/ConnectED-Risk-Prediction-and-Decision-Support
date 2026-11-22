@@ -4,6 +4,7 @@ const SCHOOL_FIELDS = `
   school_id name country country_name region region_label town time_zone status
   suspended_reason suspended_at suspended_by_name reactivated_at reactivated_by_name
   created_at created_by_name updated_at active_admin_count _version
+  deletion_started_at deletion_started_by_name deleted_at deleted_by_name deleted_records
 `;
 
 const ADMIN_FIELDS = 'teacher_id first_name last_name email status sign_in';
@@ -42,4 +43,13 @@ export const ADD_SCHOOL_ADMIN = `mutation AddSchoolAdmin($input: AddSchoolAdminI
 
 export const RESET_SCHOOL_ADMIN_PASSWORD = `mutation ResetSchoolAdminPassword($input: ResetSchoolAdminPasswordInput!) {
   resetSchoolAdminPassword(input: $input) { admin { ${ADMIN_FIELDS} } temporary_password email { sent problem } }
+}`;
+
+/** Deletes a school for good (suspended, or without an active administrator). Answers DELETING (call CONTINUE_SCHOOL_DELETION until DELETED) or DELETED. */
+export const DELETE_SCHOOL = `mutation DeleteSchool($input: DeleteSchoolInput!) {
+  deleteSchool(input: $input) { ${SCHOOL_FIELDS} }
+}`;
+
+export const CONTINUE_SCHOOL_DELETION = `mutation ContinueSchoolDeletion($input: ContinueSchoolDeletionInput!) {
+  continueSchoolDeletion(input: $input) { ${SCHOOL_FIELDS} }
 }`;

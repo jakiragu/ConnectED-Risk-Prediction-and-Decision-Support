@@ -160,12 +160,40 @@ export const audit = (realm, action, actor, subject, details = {}) => ddb.send(n
 }));
 
 export async function audits(realm) {
-  const res = await ddb.send(new QueryCommand({
-    TableName: TABLE,
-    KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
-    ExpressionAttributeValues: { ':p': partition(realm), ':s': sk.accountAuditPrefix() },
-  }));
-  return res.Items || [];
+  const out = [];
+  let ExclusiveStartKey;
+  do {
+    const res = await ddb.send(new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
+      ExpressionAttributeValues: { ':p': partition(realm), ':s': sk.accountAuditPrefix() },
+      ExclusiveStartKey,
+    }));
+    out.push(...(res.Items || []));
+    ExclusiveStartKey = res.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return out;
+}
+
+/**
+ * Removes what these records hold about one person when their account is deleted: which Google
+ * account was linked, any pending link request, and the Google address quoted in earlier audit
+ * entries about them. The audit entries themselves stay, with who did what and when.
+ */
+export async function forgetPerson(realm, sub) {
+  for (const SK of [sk.signIn(sub), sk.linkRequest(sub)]) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: key(realm, SK) }));
+  for (const row of await audits(realm)) {
+    if (row.subject_sub !== sub || !(row.details && ('google_email' in row.details || 'previous_google_email' in row.details))) continue;
+    const { google_email: _a, previous_google_email: _b, ...details } = row.details;
+    await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: row.PK, SK: row.SK },
+      UpdateExpression: 'SET #d = :d',
+      ConditionExpression: 'attribute_exists(PK)',
+      ExpressionAttributeNames: { '#d': 'details' },
+      ExpressionAttributeValues: { ':d': details },
+    }));
+  }
 }
 
 // --------------------------------------------------------------------- sessions
